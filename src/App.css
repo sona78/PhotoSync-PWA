@@ -1,0 +1,175 @@
+.container {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  border: 3px solid #000;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.header {
+  background: #000;
+  color: #fff;
+  padding: 12px 16px;
+  font-size: 24px;
+  letter-spacing: 3px;
+  text-align: center;
+  border-bottom: 3px solid #000;
+  flex-shrink: 0;
+}
+
+.content {
+  padding: 20px;
+  background: #fff;
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+.section-title {
+  font-size: 18px;
+  color: #666;
+  margin-bottom: 15px;
+  letter-spacing: 2px;
+}
+
+.settings-content {
+  border: 3px solid #000;
+  padding: 30px;
+  background: #fff;
+  min-height: 200px;
+}
+
+.info-text {
+  color: #999;
+  font-size: 18px;
+  text-align: center;
+  padding: 40px 20px;
+  letter-spacing: 1px;
+  line-height: 2;
+}
+
+/* Tab Bar */
+.tab-bar {
+  background: #f0f0f0;
+  border-top: 3px solid #000;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.tab {
+  flex: 1;
+  padding: 16px;
+  text-align: center;
+  font-size: 20px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  background: #f0f0f0;
+  color: #666;
+  border-right: 2px solid #ccc;
+  transition: all 0.1s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tab:last-child {
+  border-right: none;
+}
+
+.tab:hover {
+  background: #e0e0e0;
+}
+
+.tab.active {
+  background: #fff;
+  color: #000;
+  font-weight: bold;
+}
+
+/* Status Bar */
+.status-bar {
+  background: #f0f0f0;
+  border-top: 2px solid #ccc;
+  padding: 10px 18px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 16px;
+  color: #666;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+.status-item {
+  display: flex;
+  gap: 10px;
+}
+
+#status {
+  color: #000;
+}
+
+.blink {
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .container {
+    border: 2px solid #000;
+  }
+
+  .header {
+    font-size: 20px;
+    padding: 10px 12px;
+  }
+
+  .content {
+    padding: 15px;
+  }
+
+  .section-title {
+    font-size: 16px;
+  }
+
+  .tab {
+    font-size: 18px;
+    padding: 14px;
+  }
+
+  .status-bar {
+    font-size: 14px;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .status-item {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    font-size: 18px;
+    letter-spacing: 2px;
+  }
+
+  .status-bar {
+    font-size: 12px;
+  }
+}

@@ -1,0 +1,131 @@
+.auth-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+  padding: 20px;
+}
+
+.auth-box {
+  width: 100%;
+  max-width: 400px;
+  border: 2px solid #fff;
+  padding: 30px;
+  background: #000;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+}
+
+.auth-header {
+  font-family: 'VT323', monospace;
+  font-size: 24px;
+  color: #fff;
+  text-align: center;
+  margin-bottom: 30px;
+  border-bottom: 1px solid #fff;
+  padding-bottom: 15px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-field label {
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.auth-input {
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  padding: 10px;
+  background: #000;
+  color: #fff;
+  border: 1px solid #fff;
+  outline: none;
+}
+
+.auth-input:focus {
+  border-color: #fff;
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+}
+
+.auth-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-button {
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  padding: 12px 20px;
+  background: #000;
+  color: #fff;
+  border: 2px solid #fff;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.2s;
+}
+
+.auth-button:hover:not(:disabled) {
+  background: #fff;
+  color: #000;
+}
+
+.auth-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-button-secondary {
+  margin-top: 10px;
+  border-color: #666;
+  color: #999;
+}
+
+.auth-button-secondary:hover:not(:disabled) {
+  background: #333;
+  color: #fff;
+  border-color: #fff;
+}
+
+.auth-message {
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  color: #0f0;
+  text-align: center;
+  margin-top: 20px;
+  padding: 10px;
+  border: 1px solid #0f0;
+  background: rgba(0, 255, 0, 0.1);
+}
+
+.auth-message.error {
+  color: #f00;
+  border-color: #f00;
+  background: rgba(255, 0, 0, 0.1);
+}
+
+.auth-info {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid #333;
+}
+
+.auth-info p {
+  font-family: 'VT323', monospace;
+  font-size: 14px;
+  color: #999;
+  text-align: center;
+  margin: 8px 0;
+  line-height: 1.4;
+}
