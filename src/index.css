@@ -4,6 +4,13 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Prevent rubber band scrolling on iOS */
+  overscroll-behavior: none;
+  /* Better text rendering on mobile */
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   background: #ffffff;
   font-family: 'VT323', 'Courier New', monospace;
@@ -13,9 +20,33 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Prevent pull-to-refresh on mobile */
+  overscroll-behavior-y: contain;
+  /* Better touch response */
+  -webkit-tap-highlight-color: transparent;
+  /* Prevent text selection on touch */
+  -webkit-touch-callout: none;
+  user-select: none;
 }
 
 #root {
   height: 100vh;
+  /* Use dynamic viewport height for better mobile support */
+  height: 100dvh;
   width: 100vw;
+  /* Prevent overscroll */
+  overscroll-behavior: none;
+}
+
+/* Allow text selection in specific areas */
+input, textarea, [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Better mobile scrolling */
+@supports (-webkit-overflow-scrolling: touch) {
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
 }

@@ -56,12 +56,19 @@
   left: 0;
   width: 100vw;
   height: 100vh;
+  /* Use dynamic viewport height for mobile */
+  height: 100dvh;
   background: rgba(0, 0, 0, 0.95);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  /* Safe areas for notched devices */
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
 }
 
 .photo-viewer-content {
@@ -129,12 +136,23 @@
     gap: 10px;
   }
 
+  .photo-item:hover {
+    /* Disable hover effect on touch devices */
+    transform: none;
+  }
+
   .photo-viewer {
     padding: 10px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
   }
 
   .photo-viewer-content {
     border: 2px solid #000;
+    max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
   }
 
   .photo-viewer-header {
@@ -144,17 +162,25 @@
 
   .close-btn {
     font-size: 16px;
-    padding: 6px 12px;
+    padding: 8px 16px;
+    /* Better touch target */
+    min-width: 80px;
+    min-height: 44px;
   }
 
   .photo-viewer-image {
     padding: 10px;
   }
+
+  .gallery-empty {
+    border: 2px solid #000;
+  }
 }
 
 @media (max-width: 480px) {
   .gallery {
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
+    /* Fixed 3 columns for better mobile layout */
     gap: 8px;
   }
 
@@ -163,19 +189,29 @@
   }
 
   .gallery-empty {
-    font-size: 16px;
-    padding: 60px 15px;
+    font-size: 14px;
+    padding: 40px 15px;
+    line-height: 1.8;
   }
 
   .photo-viewer-header {
     font-size: 14px;
-    flex-direction: column;
-    gap: 8px;
-    align-items: flex-start;
+    padding: 8px 10px;
+  }
+
+  .photo-viewer-header span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60%;
   }
 
   .close-btn {
     font-size: 14px;
-    align-self: flex-end;
+    padding: 8px 12px;
+  }
+
+  .photo-viewer-image {
+    padding: 8px;
   }
 }
