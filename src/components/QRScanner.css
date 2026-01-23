@@ -5,6 +5,12 @@
   background: #fff;
 }
 
+.pairing-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .scan-button,
 .stop-button {
   width: 100%;
@@ -20,10 +26,23 @@
   transition: all 0.1s;
 }
 
+.scan-button.secondary {
+  background: #f0f0f0;
+  border-color: #666;
+  color: #333;
+  font-size: 20px;
+}
+
 .scan-button:hover,
 .stop-button:hover {
   background: #000;
   color: #fff;
+}
+
+.scan-button.secondary:hover {
+  background: #666;
+  color: #fff;
+  border-color: #666;
 }
 
 .scan-button:active,
@@ -72,17 +91,96 @@
   letter-spacing: 1px;
 }
 
+/* Manual Entry Form */
+.manual-entry {
+  margin-top: 10px;
+}
+
+.manual-entry h3 {
+  font-size: 22px;
+  letter-spacing: 2px;
+  margin-bottom: 10px;
+  color: #000;
+  text-align: center;
+}
+
+.manual-instructions {
+  font-size: 16px;
+  color: #666;
+  text-align: center;
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 16px;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  color: #000;
+  font-weight: bold;
+}
+
+.manual-input {
+  width: 100%;
+  padding: 12px;
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  border: 3px solid #000;
+  background: #fff;
+  color: #000;
+  letter-spacing: 1px;
+  box-sizing: border-box;
+}
+
+.manual-input:focus {
+  outline: none;
+  border-color: #666;
+  background: #f9f9f9;
+}
+
+.manual-input::placeholder {
+  color: #999;
+}
+
+.form-group small {
+  display: block;
+  font-size: 14px;
+  color: #999;
+  margin-top: 6px;
+  letter-spacing: 0.5px;
+}
+
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.button-group button {
+  flex: 1;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .qr-scanner {
     padding: 15px;
     margin: 15px 0;
+    border: 2px solid #000;
   }
 
   .scan-button,
   .stop-button {
     font-size: 20px;
     padding: 14px 18px;
+  }
+
+  .scan-button.secondary {
+    font-size: 18px;
   }
 
   .qr-reader {
@@ -93,22 +191,71 @@
     font-size: 16px;
     padding: 12px;
   }
+
+  .manual-entry h3 {
+    font-size: 20px;
+  }
+
+  .manual-instructions {
+    font-size: 14px;
+  }
+
+  .form-group label {
+    font-size: 14px;
+  }
+
+  .manual-input {
+    font-size: 16px;
+    padding: 10px;
+    border: 2px solid #000;
+  }
+
+  .form-group small {
+    font-size: 12px;
+  }
 }
 
 @media (max-width: 480px) {
   .qr-scanner {
-    padding: 10px;
-    margin: 10px 0;
+    padding: 12px;
+    margin: 12px 0;
   }
 
   .scan-button,
   .stop-button {
     font-size: 18px;
     padding: 12px 16px;
+    letter-spacing: 1px;
+  }
+
+  .scan-button.secondary {
+    font-size: 16px;
   }
 
   .qr-error {
     font-size: 14px;
     padding: 10px;
+  }
+
+  .manual-entry h3 {
+    font-size: 18px;
+  }
+
+  .manual-instructions {
+    font-size: 13px;
+    margin-bottom: 15px;
+  }
+
+  .form-group {
+    margin-bottom: 15px;
+  }
+
+  .manual-input {
+    font-size: 14px;
+    padding: 8px;
+  }
+
+  .button-group {
+    flex-direction: column;
   }
 }
