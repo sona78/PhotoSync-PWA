@@ -1,146 +1,130 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
-import { supabase } from '../lib/supabase';
+import { Html5Qrcode } from 'html5-qrcode';
 import './QRScanner.css';
 
-const QRScanner = ({ onPairSuccess, onCancel }) => {
-  const scannerRef = useRef(null);
+const QRScanner = ({ onScanSuccess, onScanError }) => {
   const [scanning, setScanning] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [error, setError] = useState(null);
+  const html5QrCodeRef = useRef(null);
 
-  useEffect(() => {
-    if (!scanning && scannerRef.current) {
+  const startScanning = async () => {
+    try {
+      setError(null);
       setScanning(true);
-      setError('');
-      setSuccess('');
 
-      const scanner = new Html5QrcodeScanner(
-        scannerRef.current.id,
+      const html5QrCode = new Html5Qrcode('qr-reader');
+      html5QrCodeRef.current = html5QrCode;
+
+      await html5QrCode.start(
+        { facingMode: 'environment' }, // Use back camera
         {
-          qrbox: { width: 250, height: 250 },
-          fps: 5,
-          aspectRatio: 1.0
+          fps: 10,
+          qrbox: { width: 250, height: 250 }
         },
-        false // verbose
-      );
-
-      scanner.render(
-        async (decodedText, decodedResult) => {
+        (decodedText) => {
+          // Validate QR payload
           try {
-            // Parse QR code JSON
-            const qrData = JSON.parse(decodedText);
-            
-            // Validate QR code structure
-            if (!qrData.ws || !qrData.http || !qrData.token) {
-              throw new Error('Invalid QR code format');
+            const payload = JSON.parse(decodedText);
+
+            // Validate structure
+            if (!payload.v || !payload.s || !payload.p || !payload.t) {
+              throw new Error('Invalid QR code format - missing required fields');
             }
 
-            // Stop scanner
-            scanner.clear();
-            setScanning(false);
-
-            // Validate token via HTTP endpoint
-            const validateUrl = `${qrData.http}/api/token/validate/${qrData.token}`;
-            const validateResponse = await fetch(validateUrl);
-            
-            if (!validateResponse.ok) {
-              throw new Error('Failed to validate token');
+            // Validate version
+            if (payload.v !== 1) {
+              throw new Error('Unsupported QR code version');
             }
 
-            const validateResult = await validateResponse.json();
-            
-            if (!validateResult.valid) {
-              throw new Error('Invalid pairing token');
+            // Validate token format (64 hex characters)
+            if (!/^[a-f0-9]{64}$/i.test(payload.t)) {
+              throw new Error('Invalid token format');
             }
 
-            // Get current user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-              throw new Error('User not authenticated');
+            // Validate expiration
+            if (payload.e && payload.e < Date.now()) {
+              throw new Error('QR code has expired');
             }
 
-            // Save to Supabase
-            const { data, error: insertError } = await supabase
-              .from('user_devices')
-              .insert({
-                user_id: user.id,
-                pairing_token: qrData.token,
-                server_url: qrData.ws,
-                http_url: qrData.http
-              })
-              .select()
-              .single();
-
-            if (insertError) {
-              throw insertError;
+            // Validate server address (basic)
+            if (!/^[\d.]+$/.test(payload.s) && !/^[a-z0-9.-]+$/i.test(payload.s)) {
+              throw new Error('Invalid server address');
             }
 
-            setSuccess('Device paired successfully!');
-            
-            // Call success callback after a short delay
-            setTimeout(() => {
-              if (onPairSuccess) {
-                onPairSuccess(data);
-              }
-            }, 1500);
+            // Validate port
+            if (typeof payload.p !== 'number' || payload.p < 1 || payload.p > 65535) {
+              throw new Error('Invalid port number');
+            }
 
+            // Success - stop scanning
+            stopScanning();
+            onScanSuccess(payload);
           } catch (err) {
-            console.error('Pairing error:', err);
-            setError(err.message || 'Failed to pair device');
-            setScanning(false);
-            scanner.clear();
+            setError(err.message);
+            if (onScanError) onScanError(err);
+
+            // Auto-clear error after 3 seconds to allow retry
+            setTimeout(() => setError(null), 3000);
           }
         },
         (errorMessage) => {
-          // Ignore scan errors (just keep scanning)
+          // Ignore scanning errors (they happen continuously while searching for QR codes)
         }
       );
+    } catch (err) {
+      const errorMessage = err.name === 'NotAllowedError'
+        ? 'Camera access denied. Please grant camera permissions.'
+        : 'Camera not available or not supported.';
 
-      // Cleanup on unmount
-      return () => {
-        if (scanner) {
-          scanner.clear().catch(() => {
-            // Ignore cleanup errors
-          });
-        }
-      };
+      setError(errorMessage);
+      setScanning(false);
+      if (onScanError) onScanError(new Error(errorMessage));
     }
-  }, [scanning, onPairSuccess]);
+  };
+
+  const stopScanning = () => {
+    if (html5QrCodeRef.current) {
+      html5QrCodeRef.current.stop()
+        .then(() => {
+          html5QrCodeRef.current = null;
+          setScanning(false);
+          setError(null);
+        })
+        .catch((err) => {
+          console.error('Error stopping scanner:', err);
+          setScanning(false);
+        });
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopScanning();
+    };
+  }, []);
 
   return (
-    <div className="qr-scanner-container">
-      <div className="qr-scanner-header">
-        <h2>SCAN QR CODE</h2>
-        {onCancel && (
-          <button className="qr-scanner-cancel" onClick={onCancel}>
-            CANCEL
+    <div className="qr-scanner">
+      {!scanning && (
+        <button onClick={startScanning} className="scan-button">
+          SCAN QR CODE
+        </button>
+      )}
+
+      {scanning && (
+        <>
+          <div id="qr-reader" className="qr-reader"></div>
+          <button onClick={stopScanning} className="stop-button">
+            STOP SCANNING
           </button>
-        )}
-      </div>
+        </>
+      )}
 
       {error && (
-        <div className="qr-scanner-error">
+        <div className="qr-error">
           ERROR: {error}
         </div>
       )}
-
-      {success && (
-        <div className="qr-scanner-success">
-          {success}
-        </div>
-      )}
-
-      <div 
-        id="qr-scanner" 
-        ref={scannerRef}
-        className="qr-scanner-view"
-      />
-
-      <div className="qr-scanner-info">
-        <p>POINT YOUR CAMERA AT THE QR CODE</p>
-        <p>MAKE SURE BOTH DEVICES ARE ON THE SAME NETWORK</p>
-      </div>
     </div>
   );
 };

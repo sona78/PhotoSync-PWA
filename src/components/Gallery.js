@@ -1,105 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '../lib/supabase';
-import WebSocketClient from '../lib/WebSocketClient';
+import React, { useState, useEffect } from 'react';
 import './Gallery.css';
+import { usePhotoSync } from '../hooks/usePhotoSync';
 
 const Gallery = ({ onPhotoCountChange }) => {
-  const [photos, setPhotos] = useState([]);
+  const { photos, connectionState, error, syncProgress } = usePhotoSync();
   const [selectedPhoto, setSelectedPhoto] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const wsClientRef = useRef(null);
-  const deviceRef = useRef(null);
-
-  useEffect(() => {
-    loadPhotos();
-    
-    // Cleanup on unmount
-    return () => {
-      if (wsClientRef.current) {
-        wsClientRef.current.disconnect();
-      }
-    };
-  }, []);
 
   useEffect(() => {
     onPhotoCountChange(photos.length);
   }, [photos, onPhotoCountChange]);
-
-  const loadPhotos = async () => {
-    try {
-      setLoading(true);
-      setError('');
-
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError('Not authenticated');
-        setLoading(false);
-        return;
-      }
-
-      // Fetch paired devices
-      const { data: devices, error: devicesError } = await supabase
-        .from('user_devices')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('paired_at', { ascending: false })
-        .limit(1);
-
-      if (devicesError) {
-        throw devicesError;
-      }
-
-      if (!devices || devices.length === 0) {
-        setError('No paired devices. Please pair a device in Settings.');
-        setLoading(false);
-        return;
-      }
-
-      const device = devices[0];
-      deviceRef.current = device;
-
-      // Connect to WebSocket
-      const wsClient = new WebSocketClient(device.server_url, device.pairing_token);
-      wsClientRef.current = wsClient;
-
-      await wsClient.connect();
-
-      // Request manifest
-      const manifest = await wsClient.requestManifest();
-      
-      if (manifest && manifest.photos) {
-        // Transform manifest photos to gallery format
-        const galleryPhotos = manifest.photos.map(photo => ({
-          id: photo.id,
-          filename: photo.filename,
-          size: photo.size,
-          modified: photo.modified,
-          width: photo.width,
-          height: photo.height,
-          thumbnailUrl: `${device.http_url}/api/photo/${photo.id}?quality=60&maxDimension=200`,
-          fullUrl: `${device.http_url}/api/photo/${photo.id}?quality=80&maxDimension=1920`
-        }));
-
-        setPhotos(galleryPhotos);
-      } else {
-        setPhotos([]);
-      }
-
-      setLoading(false);
-    } catch (err) {
-      console.error('Error loading photos:', err);
-      setError(err.message || 'Failed to load photos');
-      setLoading(false);
-      
-      // Cleanup on error
-      if (wsClientRef.current) {
-        wsClientRef.current.disconnect();
-        wsClientRef.current = null;
-      }
-    }
-  };
 
   const handlePhotoClick = (photo) => {
     setSelectedPhoto(photo);
@@ -109,27 +18,49 @@ const Gallery = ({ onPhotoCountChange }) => {
     setSelectedPhoto(null);
   };
 
-  if (loading) {
+  // Show connection/error states
+  if (connectionState === 'disconnected' && photos.length === 0) {
     return (
       <div className="gallery-empty">
-        LOADING PHOTOS...
+        NOT CONNECTED TO SERVER<br />
+        PAIR YOUR DEVICE IN SETTINGS TO VIEW PHOTOS
       </div>
     );
   }
 
-  if (error) {
+  if (connectionState === 'connecting') {
     return (
       <div className="gallery-empty">
-        ERROR: {error}
+        CONNECTING TO SERVER...
       </div>
     );
   }
 
-  if (photos.length === 0) {
+  if (connectionState === 'authenticating') {
     return (
       <div className="gallery-empty">
-        NO PHOTOS FOUND<br />
-        PAIR A DEVICE IN SETTINGS
+        AUTHENTICATING...
+      </div>
+    );
+  }
+
+  if (connectionState === 'error' && error) {
+    return (
+      <div className="gallery-empty">
+        CONNECTION ERROR<br />
+        {error}<br />
+        <br />
+        GO TO SETTINGS TO PAIR AGAIN
+      </div>
+    );
+  }
+
+  if (connectionState === 'connected' && photos.length === 0) {
+    return (
+      <div className="gallery-empty">
+        CONNECTED<br />
+        NO PHOTOS FOUND ON SERVER<br />
+        {syncProgress.total > 0 && `LOADING ${syncProgress.current}/${syncProgress.total}`}
       </div>
     );
   }
@@ -144,7 +75,7 @@ const Gallery = ({ onPhotoCountChange }) => {
             onClick={() => handlePhotoClick(photo)}
           >
             <img
-              src={photo.thumbnailUrl}
+              src={photo.thumbnail}
               alt={photo.filename}
               loading="lazy"
             />
@@ -163,7 +94,7 @@ const Gallery = ({ onPhotoCountChange }) => {
               </button>
             </div>
             <div className="photo-viewer-image">
-              <img src={selectedPhoto.fullUrl} alt={selectedPhoto.filename} />
+              <img src={selectedPhoto.url} alt={selectedPhoto.filename} />
             </div>
           </div>
         </div>
