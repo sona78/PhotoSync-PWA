@@ -3,6 +3,7 @@ import './App.css';
 import Gallery from './components/Gallery';
 import Auth from './components/Auth';
 import QRScanner from './components/QRScanner';
+import DebugLog from './components/DebugLog';
 import { supabase } from './lib/supabase';
 import { usePhotoSync } from './hooks/usePhotoSync';
 
@@ -12,9 +13,10 @@ function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showQRScanner, setShowQRScanner] = useState(false);
+  const [showDebugLogs, setShowDebugLogs] = useState(false);
 
   // Photo sync connection
-  const { connectionState, photos, connect, disconnect, requestManifest, error: syncError, syncProgress } = usePhotoSync();
+  const { connectionState, photos, connect, disconnect, requestManifest, error: syncError, syncProgress, debugLogs, clearLogs } = usePhotoSync();
 
   // Update photo count when photos change
   useEffect(() => {
@@ -62,8 +64,9 @@ function App() {
 
   const handleQRScanSuccess = (payload) => {
     console.log('QR scanned successfully:', payload);
-    connect(payload.s, payload.p, payload.t);
     setShowQRScanner(false);
+    // Connect will log its own messages
+    connect(payload.s, payload.p, payload.t);
   };
 
   const handleQRScanError = (error) => {
@@ -119,6 +122,14 @@ function App() {
         <div className={`tab-content ${activeTab === 'settings' ? 'active' : ''}`}>
           <div className="section-title">DEVICE PAIRING</div>
           <div className="settings-content">
+            {/* Debug Logs */}
+            <DebugLog
+              logs={debugLogs}
+              visible={showDebugLogs}
+              onToggle={() => setShowDebugLogs(!showDebugLogs)}
+              onClear={clearLogs}
+            />
+
             {connectionState === 'disconnected' && !showQRScanner && (
               <div style={{ marginBottom: '30px' }}>
                 <p className="info-text" style={{ marginBottom: '15px' }}>

@@ -15,12 +15,31 @@ export const usePhotoSync = () => {
   const [photos, setPhotos] = useState([]);
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState(null);
+  const [debugLogs, setDebugLogs] = useState([]);
 
   const wsRef = useRef(null);
   const tokenRef = useRef(null);
   const serverRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const photoBuffersRef = useRef(new Map());
+
+  // Debug logging function
+  const addLog = useCallback((level, message) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = { level, message, timestamp };
+
+    // Also log to console
+    const consoleMsg = `[PhotoSync] ${message}`;
+    if (level === 'error') {
+      console.error(consoleMsg);
+    } else if (level === 'warn') {
+      console.warn(consoleMsg);
+    } else {
+      console.log(consoleMsg);
+    }
+
+    setDebugLogs(prev => [...prev.slice(-99), logEntry]); // Keep last 100 logs
+  }, []);
 
   // Photo chunk reassembly
   const handlePhotoChunk = useCallback((message) => {
@@ -110,17 +129,17 @@ export const usePhotoSync = () => {
     switch (message.type) {
       case 'AUTH_RESPONSE':
         if (message.success) {
-          console.log('[PhotoSync] Authenticated successfully');
+          addLog('info', 'Authentication successful!');
           setConnectionState(CONNECTION_STATES.CONNECTED);
           setError(null);
           // Update last connected timestamp in Supabase
           updateLastConnected().catch(err => {
-            console.warn('[PhotoSync] Failed to update last connected timestamp:', err);
+            addLog('warn', `Failed to update last connected timestamp: ${err}`);
           });
           // Request manifest
           requestManifest();
         } else {
-          console.error('[PhotoSync] Auth failed:', message.reason);
+          addLog('error', `Authentication failed: ${message.reason}`);
           const errorMessages = {
             'INVALID_FORMAT': 'Invalid token format',
             'TOKEN_NOT_FOUND': 'Token not found or invalid',
@@ -136,7 +155,7 @@ export const usePhotoSync = () => {
         break;
 
       case 'MANIFEST_RESPONSE':
-        console.log(`[PhotoSync] Received manifest: ${message.count} photos`);
+        addLog('info', `Received manifest: ${message.count} photos`);
 
         // Clean up old blob URLs before replacing photos
         setPhotos(prevPhotos => {
@@ -201,15 +220,15 @@ export const usePhotoSync = () => {
 
         // Automatically request fresh manifest
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          console.log('[PhotoSync] Requesting updated manifest...');
+          addLog('info', 'Manifest update detected, requesting fresh data...');
           requestManifest();
         }
         break;
 
       default:
-        console.warn('[PhotoSync] Unknown message type:', message.type);
+        addLog('warn', `Unknown message type: ${message.type}`);
     }
-  }, [handlePhotoChunk, handlePhotoComplete, requestBatch, requestManifest]);
+  }, [handlePhotoChunk, handlePhotoComplete, requestBatch, requestManifest, addLog]);
 
   // Store connect function in ref to avoid circular dependency
   const connectRef = useRef(null);
@@ -225,7 +244,7 @@ export const usePhotoSync = () => {
       const supabaseResult = await loadDeviceConnection();
       if (supabaseResult.success && supabaseResult.data && connectRef.current) {
         const { serverAddress, serverPort, authToken } = supabaseResult.data;
-        console.log('[PhotoSync] Attempting reconnect with Supabase credentials...');
+        addLog('info', `Attempting reconnect with Supabase credentials to ${serverAddress}:${serverPort}`);
         connectRef.current(serverAddress, serverPort, authToken);
         return;
       }
@@ -234,11 +253,11 @@ export const usePhotoSync = () => {
       const saved = localStorage.getItem('photosync_server');
       if (saved && connectRef.current) {
         const { address, port, token } = JSON.parse(saved);
-        console.log('[PhotoSync] Attempting reconnect with localStorage credentials...');
+        addLog('info', `Attempting reconnect with localStorage credentials to ${address}:${port}`);
         connectRef.current(address, port, token);
       }
     }, 5000); // 5 second delay
-  }, []);
+  }, [addLog]);
 
   // Connect to server with token
   const connect = useCallback(async (serverAddress, port, token, deviceName = null) => {
@@ -270,14 +289,14 @@ export const usePhotoSync = () => {
     setError(null);
 
     const wsUrl = `ws://${serverAddress}:${port}`;
-    console.log('[PhotoSync] Connecting to:', wsUrl);
-    console.log('[PhotoSync] Network status:', navigator.onLine ? 'Online' : 'Offline');
-    console.log('[PhotoSync] Page protocol:', window.location.protocol);
-    console.log('[PhotoSync] User agent:', navigator.userAgent);
+    addLog('info', `Connecting to: ${wsUrl}`);
+    addLog('info', `Network status: ${navigator.onLine ? 'Online' : 'Offline'}`);
+    addLog('info', `Page protocol: ${window.location.protocol}`);
+    addLog('info', `User agent: ${navigator.userAgent}`);
 
     // Check for mixed content issues (HTTPS page with WS://)
     if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
-      console.warn('[PhotoSync] WARNING: Using insecure WebSocket (ws://) from secure page (https://). This may be blocked by the browser.');
+      addLog('warn', 'WARNING: Using insecure WebSocket (ws://) from secure page (https://). This may be blocked by the browser.');
     }
 
     const ws = new WebSocket(wsUrl);
@@ -286,7 +305,7 @@ export const usePhotoSync = () => {
     // Set connection timeout
     const connectionTimeout = setTimeout(() => {
       if (ws.readyState !== WebSocket.OPEN) {
-        console.error('[PhotoSync] Connection timeout');
+        addLog('error', 'Connection timeout - no response from server');
         const timeoutMsg = `Connection timeout to ${serverAddress}:${port}. Check that server is running and reachable from your phone's network.`;
         setError(timeoutMsg);
         setConnectionState(CONNECTION_STATES.ERROR);
@@ -296,7 +315,7 @@ export const usePhotoSync = () => {
 
     ws.onopen = () => {
       clearTimeout(connectionTimeout);
-      console.log('[PhotoSync] Connected, authenticating...');
+      addLog('info', 'WebSocket connected! Sending authentication...');
       setConnectionState(CONNECTION_STATES.AUTHENTICATING);
 
       // Send AUTH message (MessagePack encoded)
@@ -324,7 +343,7 @@ export const usePhotoSync = () => {
 
     ws.onerror = (err) => {
       clearTimeout(connectionTimeout);
-      console.error('[PhotoSync] WebSocket error:', err);
+      addLog('error', `WebSocket error: ${err.type || 'Connection failed'}`);
 
       // Provide more helpful error messages
       let errorMessage = `Cannot connect to ${serverAddress}:${port}. `;
@@ -332,27 +351,29 @@ export const usePhotoSync = () => {
       // Check if it's a network reachability issue
       if (!navigator.onLine) {
         errorMessage += 'No internet connection detected.';
+        addLog('error', 'Device is offline - no internet connection');
       } else {
         errorMessage += 'Check that: (1) Server is running, (2) Phone and server are on same WiFi network, (3) Firewall allows connections.';
+        addLog('error', 'Connection failed. Possible causes: server not running, wrong network, or firewall blocking');
       }
 
-      console.error('[PhotoSync] Error details:', errorMessage);
       setError(errorMessage);
       setConnectionState(CONNECTION_STATES.ERROR);
     };
 
     ws.onclose = (event) => {
       clearTimeout(connectionTimeout);
-      console.log('[PhotoSync] Disconnected:', event.code, event.reason);
+      addLog('warn', `WebSocket closed - Code: ${event.code}, Reason: ${event.reason || 'None'}`);
       wsRef.current = null;
       setConnectionState(CONNECTION_STATES.DISCONNECTED);
 
       // Auto-reconnect if not intentional disconnect
       if (event.code !== 1000) { // Not normal closure
+        addLog('info', 'Scheduling reconnect in 5 seconds...');
         scheduleReconnect();
       }
     };
-  }, [handleMessage, scheduleReconnect]);
+  }, [handleMessage, scheduleReconnect, addLog]);
 
   // Store connect in ref for scheduleReconnect
   useEffect(() => {
@@ -397,11 +418,13 @@ export const usePhotoSync = () => {
   // Auto-connect on mount if credentials exist
   useEffect(() => {
     const attemptAutoConnect = async () => {
+      addLog('info', 'Checking for saved connection...');
+
       // Try loading from Supabase first
       const supabaseResult = await loadDeviceConnection();
       if (supabaseResult.success && supabaseResult.data) {
         const { serverAddress, serverPort, authToken } = supabaseResult.data;
-        console.log('[PhotoSync] Auto-connecting with Supabase credentials...');
+        addLog('info', `Found Supabase credentials for ${serverAddress}:${serverPort}`);
         connect(serverAddress, serverPort, authToken);
         return;
       }
@@ -411,12 +434,14 @@ export const usePhotoSync = () => {
       if (saved) {
         try {
           const { address, port, token } = JSON.parse(saved);
-          console.log('[PhotoSync] Auto-connecting with localStorage credentials...');
+          addLog('info', `Found localStorage credentials for ${address}:${port}`);
           connect(address, port, token);
         } catch (error) {
-          console.error('[PhotoSync] Invalid saved connection data:', error);
+          addLog('error', `Invalid saved connection data: ${error.message}`);
           localStorage.removeItem('photosync_server');
         }
+      } else {
+        addLog('info', 'No saved connection found');
       }
     };
 
@@ -442,7 +467,7 @@ export const usePhotoSync = () => {
         return [];
       });
     };
-  }, [connect]);
+  }, [connect, addLog]);
 
   // Heartbeat
   useEffect(() => {
@@ -462,11 +487,18 @@ export const usePhotoSync = () => {
     return () => clearInterval(interval);
   }, [connectionState]);
 
+  const clearLogs = useCallback(() => {
+    setDebugLogs([]);
+    addLog('info', 'Logs cleared');
+  }, [addLog]);
+
   return {
     connectionState,
     photos,
     syncProgress,
     error,
+    debugLogs,
+    clearLogs,
     connect,
     disconnect,
     requestManifest,

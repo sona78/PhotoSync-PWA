@@ -1,0 +1,34 @@
+.debug-log-container {
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.debug-log-content {
+  scrollbar-width: thin;
+  scrollbar-color: #00ff00 #000;
+}
+
+.debug-log-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.debug-log-content::-webkit-scrollbar-track {
+  background: #000;
+}
+
+.debug-log-content::-webkit-scrollbar-thumb {
+  background: #00ff00;
+  border: 1px solid #000;
+}
+
+.debug-log-content::-webkit-scrollbar-thumb:hover {
+  background: #00aa00;
+}
