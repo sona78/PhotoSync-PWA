@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import './QRScanner.css';
 
@@ -10,6 +10,7 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
   const [manualToken, setManualToken] = useState('');
   const html5QrCodeRef = useRef(null);
   const fileInputRef = useRef(null);
+  const shouldStartCamera = useRef(false);
 
   const validateQRPayload = (payload) => {
     // Validate structure
@@ -45,52 +46,114 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
     return true;
   };
 
-  const startScanning = async () => {
-    try {
-      setError(null);
-      setScanning(true);
+  const startScanning = () => {
+    setError(null);
+    shouldStartCamera.current = true;
+    setScanning(true);
+  };
 
+  const stopScanning = useCallback(() => {
+    if (html5QrCodeRef.current) {
+      html5QrCodeRef.current.stop()
+        .then(() => {
+          html5QrCodeRef.current = null;
+          setScanning(false);
+          setError(null);
+        })
+        .catch((err) => {
+          console.error('Error stopping scanner:', err);
+          setScanning(false);
+        });
+    }
+  }, []);
+
+  const initializeCamera = useCallback(async () => {
+    try {
       const html5QrCode = new Html5Qrcode('qr-reader');
       html5QrCodeRef.current = html5QrCode;
 
-      await html5QrCode.start(
-        { facingMode: 'environment' }, // Use back camera
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 }
-        },
-        (decodedText) => {
-          // Validate QR payload
-          try {
-            const payload = JSON.parse(decodedText);
-            validateQRPayload(payload);
+      // iOS-compatible camera configuration
+      const cameraConfig = {
+        facingMode: { ideal: 'environment' },
+        // Advanced constraints for iOS Safari
+        advanced: [{ torch: false }]
+      };
 
-            // Success - stop scanning
-            stopScanning();
-            onScanSuccess(payload);
-          } catch (err) {
-            setError(err.message);
-            if (onScanError) onScanError(err);
-
-            // Auto-clear error after 3 seconds to allow retry
-            setTimeout(() => setError(null), 3000);
-          }
-        },
-        (errorMessage) => {
-          // Ignore scanning errors (they happen continuously while searching for QR codes)
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        // Disable audio to avoid permission issues
+        disableFlip: false,
+        // Better for iOS
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
         }
-      );
+      };
+
+      const handleSuccess = (decodedText) => {
+        // Validate QR payload
+        try {
+          const payload = JSON.parse(decodedText);
+          validateQRPayload(payload);
+
+          // Success - stop scanning
+          stopScanning();
+          onScanSuccess(payload);
+        } catch (err) {
+          setError(err.message);
+          if (onScanError) onScanError(err);
+
+          // Auto-clear error after 3 seconds to allow retry
+          setTimeout(() => setError(null), 3000);
+        }
+      };
+
+      const handleError = (errorMessage) => {
+        // Ignore scanning errors (they happen continuously while searching for QR codes)
+      };
+
+      // Try to get camera devices first (better for iOS)
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        console.log('[QR] Found cameras:', devices.length);
+
+        if (devices && devices.length > 0) {
+          // Prefer back camera
+          const backCamera = devices.find(d => d.label.toLowerCase().includes('back')) || devices[devices.length - 1];
+          console.log('[QR] Using camera:', backCamera.label);
+
+          await html5QrCode.start(backCamera.id, config, handleSuccess, handleError);
+        } else {
+          throw new Error('No cameras found');
+        }
+      } catch (deviceError) {
+        console.log('[QR] Device enumeration failed, trying constraints:', deviceError);
+        // Fallback to constraints if device enumeration fails
+        await html5QrCode.start(cameraConfig, config, handleSuccess, handleError);
+      }
     } catch (err) {
-      const errorMessage = err.name === 'NotAllowedError'
-        ? 'Camera access denied. Try uploading QR code image or manual entry.'
-        : 'Camera not available. Use image upload or manual entry instead.';
+      console.error('[QR] Camera error:', err);
+      let errorMessage;
+
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage = 'Camera permission denied. Please allow camera access in your browser settings.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMessage = 'No camera found on this device. Use image upload or manual entry.';
+      } else if (err.name === 'NotReadableError') {
+        errorMessage = 'Camera is in use by another app. Please close other apps and try again.';
+      } else if (err.name === 'OverconstrainedError') {
+        errorMessage = 'Camera constraints not supported. Use image upload or manual entry.';
+      } else {
+        errorMessage = `Camera error: ${err.message || 'Unknown error'}. Try image upload or manual entry.`;
+      }
 
       setError(errorMessage);
       setScanning(false);
-      setUseManualEntry(true); // Auto-switch to manual entry on iOS
-      if (onScanError) onScanError(new Error(errorMessage));
+      shouldStartCamera.current = false;
+      if (onScanError) onScanError(err);
     }
-  };
+  }, [onScanSuccess, onScanError, stopScanning]);
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -155,26 +218,23 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
     }
   };
 
-  const stopScanning = () => {
-    if (html5QrCodeRef.current) {
-      html5QrCodeRef.current.stop()
-        .then(() => {
-          html5QrCodeRef.current = null;
-          setScanning(false);
-          setError(null);
-        })
-        .catch((err) => {
-          console.error('Error stopping scanner:', err);
-          setScanning(false);
-        });
+  // Initialize camera when scanning becomes true
+  useEffect(() => {
+    if (scanning && shouldStartCamera.current) {
+      shouldStartCamera.current = false;
+      // Use setTimeout to ensure DOM has updated
+      setTimeout(() => {
+        initializeCamera();
+      }, 100);
     }
-  };
+  }, [scanning, initializeCamera]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopScanning();
     };
-  }, []);
+  }, [stopScanning]);
 
   return (
     <div className="qr-scanner">
@@ -184,14 +244,21 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
         ref={fileInputRef}
         onChange={handleFileUpload}
         accept="image/*"
+        capture="environment"
         style={{ display: 'none' }}
       />
       <div id="qr-reader-file" style={{ display: 'none' }}></div>
 
+      {error && !scanning && (
+        <div className="qr-error" style={{ marginBottom: '15px' }}>
+          <strong>ERROR:</strong> {error}
+        </div>
+      )}
+
       {!scanning && !useManualEntry && (
         <div className="pairing-options">
           <button onClick={startScanning} className="scan-button">
-            SCAN WITH CAMERA
+            {error ? 'TRY CAMERA AGAIN' : 'SCAN WITH CAMERA'}
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -262,12 +329,6 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
               </button>
             </div>
           </form>
-        </div>
-      )}
-
-      {error && (
-        <div className="qr-error">
-          ERROR: {error}
         </div>
       )}
     </div>

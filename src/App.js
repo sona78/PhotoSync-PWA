@@ -14,7 +14,12 @@ function App() {
   const [showQRScanner, setShowQRScanner] = useState(false);
 
   // Photo sync connection
-  const { connectionState, connect, disconnect, error: syncError } = usePhotoSync();
+  const { connectionState, photos, connect, disconnect, requestManifest, error: syncError, syncProgress } = usePhotoSync();
+
+  // Update photo count when photos change
+  useEffect(() => {
+    setPhotoCount(photos.length);
+  }, [photos]);
 
   useEffect(() => {
     // Check for existing session
@@ -101,7 +106,13 @@ function App() {
         {/* Gallery Tab */}
         <div className={`tab-content ${activeTab === 'gallery' ? 'active' : ''}`}>
           <div className="section-title">PHOTO GALLERY</div>
-          <Gallery onPhotoCountChange={setPhotoCount} />
+          <Gallery
+            photos={photos}
+            connectionState={connectionState}
+            error={syncError}
+            syncProgress={syncProgress}
+            requestManifest={requestManifest}
+          />
         </div>
 
         {/* Settings Tab */}
@@ -225,7 +236,31 @@ function App() {
                 border: '3px solid #aa0000',
                 marginBottom: '20px',
               }}>
-                <p className="info-text">ERROR: {syncError}</p>
+                <p className="info-text" style={{ marginBottom: '12px' }}>ERROR: {syncError}</p>
+                <button
+                  onClick={() => setShowQRScanner(true)}
+                  style={{
+                    fontFamily: "'VT323', monospace",
+                    fontSize: '18px',
+                    padding: '10px 20px',
+                    background: '#fff',
+                    color: '#000',
+                    border: '2px solid #fff',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase',
+                    width: '100%',
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#000';
+                    e.target.style.color = '#fff';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#fff';
+                    e.target.style.color = '#000';
+                  }}
+                >
+                  TRY AGAIN
+                </button>
               </div>
             )}
 

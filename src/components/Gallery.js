@@ -1,14 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import './Gallery.css';
-import { usePhotoSync } from '../hooks/usePhotoSync';
 
-const Gallery = ({ onPhotoCountChange }) => {
-  const { photos, connectionState, error, syncProgress } = usePhotoSync();
+const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest }) => {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
-
-  useEffect(() => {
-    onPhotoCountChange(photos.length);
-  }, [photos, onPhotoCountChange]);
 
   const handlePhotoClick = (photo) => {
     setSelectedPhoto(photo);
@@ -67,6 +61,34 @@ const Gallery = ({ onPhotoCountChange }) => {
 
   return (
     <>
+      {connectionState === 'connected' && (
+        <div style={{ marginBottom: '15px', textAlign: 'center' }}>
+          <button
+            onClick={requestManifest}
+            style={{
+              fontFamily: "'VT323', monospace",
+              fontSize: '18px',
+              padding: '10px 20px',
+              background: '#fff',
+              color: '#000',
+              border: '3px solid #000',
+              cursor: 'pointer',
+              textTransform: 'uppercase',
+            }}
+            onMouseOver={(e) => {
+              e.target.style.background = '#000';
+              e.target.style.color = '#fff';
+            }}
+            onMouseOut={(e) => {
+              e.target.style.background = '#fff';
+              e.target.style.color = '#000';
+            }}
+          >
+            REFRESH PHOTOS
+          </button>
+        </div>
+      )}
+
       <div className="gallery">
         {photos.map((photo) => (
           <div
