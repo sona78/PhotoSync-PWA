@@ -229,39 +229,57 @@ function App() {
             )}
 
             {syncError && (
-              <div style={{
-                padding: '15px',
-                background: '#ff0000',
-                color: '#fff',
-                border: '3px solid #aa0000',
-                marginBottom: '20px',
-              }}>
-                <p className="info-text" style={{ marginBottom: '12px' }}>ERROR: {syncError}</p>
-                <button
-                  onClick={() => setShowQRScanner(true)}
-                  style={{
-                    fontFamily: "'VT323', monospace",
-                    fontSize: '18px',
-                    padding: '10px 20px',
-                    background: '#fff',
-                    color: '#000',
-                    border: '2px solid #fff',
-                    cursor: 'pointer',
-                    textTransform: 'uppercase',
-                    width: '100%',
-                  }}
-                  onMouseOver={(e) => {
-                    e.target.style.background = '#000';
-                    e.target.style.color = '#fff';
-                  }}
-                  onMouseOut={(e) => {
-                    e.target.style.background = '#fff';
-                    e.target.style.color = '#000';
-                  }}
-                >
-                  TRY AGAIN
-                </button>
-              </div>
+              <>
+                <div style={{
+                  padding: '15px',
+                  background: '#ff0000',
+                  color: '#fff',
+                  border: '3px solid #aa0000',
+                  marginBottom: '15px',
+                }}>
+                  <p className="info-text" style={{ marginBottom: '12px' }}>ERROR: {syncError}</p>
+                  <button
+                    onClick={() => setShowQRScanner(true)}
+                    style={{
+                      fontFamily: "'VT323', monospace",
+                      fontSize: '18px',
+                      padding: '10px 20px',
+                      background: '#fff',
+                      color: '#000',
+                      border: '2px solid #fff',
+                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                      width: '100%',
+                    }}
+                    onMouseOver={(e) => {
+                      e.target.style.background = '#000';
+                      e.target.style.color = '#fff';
+                    }}
+                    onMouseOut={(e) => {
+                      e.target.style.background = '#fff';
+                      e.target.style.color = '#000';
+                    }}
+                  >
+                    TRY AGAIN
+                  </button>
+                </div>
+
+                <div style={{
+                  padding: '12px',
+                  background: '#f0f0f0',
+                  border: '2px solid #666',
+                  marginBottom: '20px',
+                  fontSize: '14px',
+                }}>
+                  <p style={{ marginBottom: '8px', fontWeight: 'bold' }}>DIAGNOSTICS:</p>
+                  <p style={{ marginBottom: '4px' }}>Network: {navigator.onLine ? 'ONLINE' : 'OFFLINE'}</p>
+                  <p style={{ marginBottom: '4px' }}>Page Protocol: {window.location.protocol.toUpperCase()}</p>
+                  <p style={{ marginBottom: '4px' }}>Platform: {navigator.platform}</p>
+                  <p style={{ marginBottom: '8px', fontSize: '12px', color: '#666' }}>
+                    Check browser console (DevTools) for detailed logs
+                  </p>
+                </div>
+              </>
             )}
 
             <div className="section-title" style={{ marginTop: '30px' }}>ACCOUNT</div>

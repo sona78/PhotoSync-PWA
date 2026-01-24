@@ -269,14 +269,26 @@ export const usePhotoSync = () => {
     setConnectionState(CONNECTION_STATES.CONNECTING);
     setError(null);
 
-    const ws = new WebSocket(`ws://${serverAddress}:${port}`);
+    const wsUrl = `ws://${serverAddress}:${port}`;
+    console.log('[PhotoSync] Connecting to:', wsUrl);
+    console.log('[PhotoSync] Network status:', navigator.onLine ? 'Online' : 'Offline');
+    console.log('[PhotoSync] Page protocol:', window.location.protocol);
+    console.log('[PhotoSync] User agent:', navigator.userAgent);
+
+    // Check for mixed content issues (HTTPS page with WS://)
+    if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
+      console.warn('[PhotoSync] WARNING: Using insecure WebSocket (ws://) from secure page (https://). This may be blocked by the browser.');
+    }
+
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     // Set connection timeout
     const connectionTimeout = setTimeout(() => {
       if (ws.readyState !== WebSocket.OPEN) {
         console.error('[PhotoSync] Connection timeout');
-        setError('Connection timeout');
+        const timeoutMsg = `Connection timeout to ${serverAddress}:${port}. Check that server is running and reachable from your phone's network.`;
+        setError(timeoutMsg);
         setConnectionState(CONNECTION_STATES.ERROR);
         ws.close();
       }
@@ -313,7 +325,19 @@ export const usePhotoSync = () => {
     ws.onerror = (err) => {
       clearTimeout(connectionTimeout);
       console.error('[PhotoSync] WebSocket error:', err);
-      setError('Connection error');
+
+      // Provide more helpful error messages
+      let errorMessage = `Cannot connect to ${serverAddress}:${port}. `;
+
+      // Check if it's a network reachability issue
+      if (!navigator.onLine) {
+        errorMessage += 'No internet connection detected.';
+      } else {
+        errorMessage += 'Check that: (1) Server is running, (2) Phone and server are on same WiFi network, (3) Firewall allows connections.';
+      }
+
+      console.error('[PhotoSync] Error details:', errorMessage);
+      setError(errorMessage);
       setConnectionState(CONNECTION_STATES.ERROR);
     };
 
