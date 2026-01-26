@@ -18,9 +18,9 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
       throw new Error('Invalid QR code format - missing required fields');
     }
 
-    // Validate version
-    if (payload.v !== 1) {
-      throw new Error('Unsupported QR code version');
+    // Validate version (only support v3 - WSS)
+    if (payload.v !== 3) {
+      throw new Error(`Unsupported QR code version: ${payload.v} (only v3/WSS supported)`);
     }
 
     // Validate token format (64 hex characters)
@@ -277,6 +277,14 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
 
       {scanning && (
         <>
+          {error && (
+            <div className="qr-error" style={{ marginBottom: '15px' }}>
+              <strong>ERROR:</strong> {error}
+              <div style={{ fontSize: '14px', marginTop: '8px' }}>
+                Scanning continues... Try a different QR code or fix the issue.
+              </div>
+            </div>
+          )}
           <div id="qr-reader" className="qr-reader"></div>
           <button onClick={stopScanning} className="stop-button">
             STOP SCANNING

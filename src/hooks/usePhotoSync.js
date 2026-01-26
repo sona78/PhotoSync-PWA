@@ -288,16 +288,12 @@ export const usePhotoSync = () => {
     setConnectionState(CONNECTION_STATES.CONNECTING);
     setError(null);
 
-    const wsUrl = `ws://${serverAddress}:${port}`;
+    // Always use wss:// (secure WebSocket)
+    const wsUrl = `wss://${serverAddress}:${port}`;
     addLog('info', `Connecting to: ${wsUrl}`);
     addLog('info', `Network status: ${navigator.onLine ? 'Online' : 'Offline'}`);
     addLog('info', `Page protocol: ${window.location.protocol}`);
-    addLog('info', `User agent: ${navigator.userAgent}`);
-
-    // Check for mixed content issues (HTTPS page with WS://)
-    if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
-      addLog('warn', 'WARNING: Using insecure WebSocket (ws://) from secure page (https://). This may be blocked by the browser.');
-    }
+    addLog('info', `User agent: ${navigator.userAgent}`)
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
