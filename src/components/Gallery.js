@@ -74,7 +74,8 @@ const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest
                 'Unknown'
       });
     }
-  }, [photos, requestPhoto, connectionMode]); // Added connectionMode to ensure we're in WebRTC mode
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos, requestPhoto, connectionMode]);
 
   // Show connection/error states
   if (connectionState === 'disconnected' && photos.length === 0) {

@@ -12,7 +12,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import SimplePeer from 'simple-peer';
 import { io } from 'socket.io-client';
-import CryptoJS from 'crypto-js';
 
 export const usePhotoSyncWebRTC = () => {
   // Connection state
@@ -24,7 +23,7 @@ export const usePhotoSyncWebRTC = () => {
   const [photoData, setPhotoData] = useState({}); // photoId -> blob URL
 
   // Progress tracking
-  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
+  const [syncProgress, ] = useState({ current: 0, total: 0 });
 
   // Connection info
   const [connectionInfo, setConnectionInfo] = useState(null); // { signalingServer, roomId }
@@ -191,12 +190,41 @@ export const usePhotoSyncWebRTC = () => {
       setError(err.message);
       setConnectionState('error');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionState, addLog]);
+
+  /**
+   * Finish photo download and create blob URL
+   */
+  const finishPhotoDownload = useCallback(() => {
+    if (!currentPhotoRef.current || !photoBufferRef.current) {
+      return;
+    }
+
+    try {
+      const photoInfo = currentPhotoRef.current;
+      const blob = new Blob(photoBufferRef.current, { type: photoInfo.mimeType });
+      const url = URL.createObjectURL(blob);
+
+      setPhotoData(prev => ({
+        ...prev,
+        [photoInfo.id]: url
+      }));
+
+      addLog(`Photo ${photoInfo.id} ready for display`);
+
+      // Cleanup
+      currentPhotoRef.current = null;
+      photoBufferRef.current = null;
+    } catch (err) {
+      addLog(`Error finishing photo download: ${err.message}`, 'error');
+    }
+  }, [addLog]);
 
   /**
    * Handle data from peer
    */
-  const handlePeerData = (data) => {
+  const handlePeerData = useCallback((data) => {
     try {
       // Try to parse as JSON
       const message = JSON.parse(data.toString());
@@ -253,35 +281,7 @@ export const usePhotoSyncWebRTC = () => {
         photoBufferRef.current.push(data);
       }
     }
-  };
-
-  /**
-   * Finish photo download and create blob URL
-   */
-  const finishPhotoDownload = () => {
-    if (!currentPhotoRef.current || !photoBufferRef.current) {
-      return;
-    }
-
-    try {
-      const photoInfo = currentPhotoRef.current;
-      const blob = new Blob(photoBufferRef.current, { type: photoInfo.mimeType });
-      const url = URL.createObjectURL(blob);
-
-      setPhotoData(prev => ({
-        ...prev,
-        [photoInfo.id]: url
-      }));
-
-      addLog(`Photo ${photoInfo.id} ready for display`);
-
-      // Cleanup
-      currentPhotoRef.current = null;
-      photoBufferRef.current = null;
-    } catch (err) {
-      addLog(`Error finishing photo download: ${err.message}`, 'error');
-    }
-  };
+  }, [addLog, finishPhotoDownload]);
 
   /**
    * Send message to peer
@@ -322,18 +322,9 @@ export const usePhotoSyncWebRTC = () => {
   }, [requestPhoto, addLog]);
 
   /**
-   * Disconnect
-   */
-  const disconnect = useCallback(() => {
-    addLog('Disconnecting...');
-    cleanup();
-    setConnectionState('disconnected');
-  }, [addLog]);
-
-  /**
    * Cleanup connections
    */
-  const cleanup = () => {
+  const cleanup = useCallback(() => {
     if (peerRef.current) {
       peerRef.current.destroy();
       peerRef.current = null;
@@ -350,7 +341,16 @@ export const usePhotoSyncWebRTC = () => {
         URL.revokeObjectURL(url);
       }
     });
-  };
+  }, [photoData]);
+
+  /**
+   * Disconnect
+   */
+  const disconnect = useCallback(() => {
+    addLog('Disconnecting...');
+    cleanup();
+    setConnectionState('disconnected');
+  }, [addLog, cleanup]);
 
   /**
    * Cleanup on unmount
@@ -359,7 +359,7 @@ export const usePhotoSyncWebRTC = () => {
     return () => {
       cleanup();
     };
-  }, []);
+  }, [cleanup]);
 
   return {
     // Connection

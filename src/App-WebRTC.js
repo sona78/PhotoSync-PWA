@@ -55,12 +55,11 @@ function App() {
     console.log('[App] Using:', connectionMode === 'webrtc' ? 'WebRTC' : 'Legacy');
     console.log('[App] webrtcSync.requestPhoto exists:', !!webrtcSync.requestPhoto);
     console.log('[App] legacySync.requestPhoto exists:', !!legacySync.requestPhoto);
-  }, [connectionMode]);
+  }, [connectionMode, webrtcSync, legacySync]);
 
   const {
     connectionState,
     photos,
-    connect,
     disconnect,
     requestManifest,
     error: syncError,
