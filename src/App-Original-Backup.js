@@ -6,7 +6,7 @@ import QRScanner from './components/QRScanner';
 import DebugLog from './components/DebugLog';
 import ConnectionDiagnostics from './components/ConnectionDiagnostics';
 import { supabase } from './lib/supabase';
-import { usePhotoSyncWebRTC } from './hooks/usePhotoSyncWebRTC';
+import { usePhotoSync } from './hooks/usePhotoSync';
 
 function App() {
   const [activeTab, setActiveTab] = useState('gallery');
@@ -16,19 +16,8 @@ function App() {
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showDebugLogs, setShowDebugLogs] = useState(false);
 
-  // WebRTC P2P connection (only connection method)
-  const activeSync = usePhotoSyncWebRTC();
-
-  const {
-    connectionState,
-    photos,
-    connect,
-    disconnect,
-    requestManifest,
-    error: syncError,
-    syncProgress,
-    debugLogs,
-  } = activeSync;
+  // Photo sync connection
+  const { connectionState, photos, connect, disconnect, requestManifest, error: syncError, syncProgress, debugLogs, clearLogs } = usePhotoSync();
 
   // Update photo count when photos change
   useEffect(() => {
@@ -53,7 +42,7 @@ function App() {
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const accessToken = hashParams.get('access_token');
     const refreshToken = hashParams.get('refresh_token');
-
+    
     if (accessToken && refreshToken) {
       supabase.auth.setSession({
         access_token: accessToken,
@@ -77,10 +66,8 @@ function App() {
   const handleQRScanSuccess = (payload) => {
     console.log('QR scanned successfully:', payload);
     setShowQRScanner(false);
-
-    // WebRTC P2P connection
-    console.log('Connecting with WebRTC P2P');
-    activeSync.connect(payload.signalingServer, payload.roomId);
+    // Connect will log its own messages
+    connect(payload.s, payload.p, payload.t);
   };
 
   const handleQRScanError = (error) => {
@@ -90,13 +77,6 @@ function App() {
   const handleDisconnect = () => {
     if (window.confirm('Disconnect from server? You will need to scan the QR code again to reconnect.')) {
       disconnect();
-    }
-  };
-
-  const clearLogs = () => {
-    // Clear logs if available
-    if (activeSync.clearLogs) {
-      activeSync.clearLogs();
     }
   };
 
@@ -124,21 +104,7 @@ function App() {
 
   return (
     <div className="container">
-      <div className="header">
-        PHOTOSYNC
-        {connectionState === 'connected' && (
-          <span style={{
-            fontSize: '12px',
-            marginLeft: '10px',
-            padding: '4px 8px',
-            background: '#00ff00',
-            color: '#000',
-            borderRadius: '4px',
-          }}>
-            🔗 WebRTC P2P
-          </span>
-        )}
-      </div>
+      <div className="header">PHOTOSYNC</div>
 
       <div className="content">
         {/* Gallery Tab */}
@@ -169,11 +135,16 @@ function App() {
             <ConnectionDiagnostics
               debugLogs={debugLogs}
               connectionState={connectionState}
-              serverInfo={activeSync.connectionInfo ? {
-                address: activeSync.connectionInfo.signalingServer,
-                port: null,
-                mode: 'WebRTC P2P'
-              } : null}
+              serverInfo={(() => {
+                try {
+                  const saved = localStorage.getItem('photosync_server');
+                  if (saved) {
+                    const { address, port } = JSON.parse(saved);
+                    return { address, port };
+                  }
+                } catch (e) {}
+                return null;
+              })()}
             />
 
             {connectionState === 'disconnected' && !showQRScanner && (
@@ -252,9 +223,6 @@ function App() {
                   }}>
                     {connectionState.toUpperCase()}
                   </p>
-                  <p className="info-text" style={{ marginBottom: '10px', fontSize: '14px' }}>
-                    MODE: WebRTC P2P
-                  </p>
                   {connectionState === 'connected' && (
                     <p className="info-text" style={{ fontSize: '16px' }}>
                       PHOTOS SYNCED: {photoCount}
@@ -323,67 +291,87 @@ function App() {
                     TRY AGAIN
                   </button>
                 </div>
+
+                <div style={{
+                  padding: '12px',
+                  background: '#f0f0f0',
+                  border: '2px solid #666',
+                  marginBottom: '20px',
+                  fontSize: '14px',
+                }}>
+                  <p style={{ marginBottom: '8px', fontWeight: 'bold' }}>DIAGNOSTICS:</p>
+                  <p style={{ marginBottom: '4px' }}>Network: {navigator.onLine ? 'ONLINE' : 'OFFLINE'}</p>
+                  <p style={{ marginBottom: '4px' }}>Page Protocol: {window.location.protocol.toUpperCase()}</p>
+                  <p style={{ marginBottom: '4px' }}>Platform: {navigator.platform}</p>
+                  <p style={{ marginBottom: '8px', fontSize: '12px', color: '#666' }}>
+                    Check browser console (DevTools) for detailed logs
+                  </p>
+                </div>
               </>
             )}
 
-            {/* User Account Info */}
-            {user && (
-              <div style={{
-                padding: '15px',
-                background: '#f0f0f0',
-                border: '2px solid #666',
-                marginTop: '20px',
-              }}>
-                <p className="info-text" style={{ marginBottom: '10px' }}>
-                  <strong>SIGNED IN AS:</strong>
-                </p>
-                <p className="info-text" style={{ marginBottom: '15px', fontSize: '14px' }}>
-                  {user.email}
-                </p>
-                <button
-                  onClick={handleSignOut}
-                  style={{
-                    fontFamily: "'VT323', monospace",
-                    fontSize: '16px',
-                    padding: '8px 16px',
-                    background: '#666',
-                    color: '#fff',
-                    border: '2px solid #666',
-                    cursor: 'pointer',
-                    textTransform: 'uppercase',
-                    width: '100%',
-                  }}
-                  onMouseOver={(e) => {
-                    e.target.style.background = '#000';
-                    e.target.style.borderColor = '#000';
-                  }}
-                  onMouseOut={(e) => {
-                    e.target.style.background = '#666';
-                    e.target.style.borderColor = '#666';
-                  }}
-                >
-                  SIGN OUT
-                </button>
-              </div>
-            )}
+            <div className="section-title" style={{ marginTop: '30px' }}>ACCOUNT</div>
+            <div style={{ marginTop: '20px' }}>
+              <p className="info-text" style={{ marginBottom: '10px' }}>
+                LOGGED IN AS: {user.email}
+              </p>
+              <button
+                onClick={handleSignOut}
+                style={{
+                  fontFamily: "'VT323', monospace",
+                  fontSize: '18px',
+                  padding: '10px 20px',
+                  background: '#000',
+                  color: '#fff',
+                  border: '2px solid #fff',
+                  cursor: 'pointer',
+                  textTransform: 'uppercase',
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.background = '#fff';
+                  e.target.style.color = '#000';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.background = '#000';
+                  e.target.style.color = '#fff';
+                }}
+              >
+                SIGN OUT
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Bottom Navigation */}
-      <div className="bottom-nav">
-        <button
-          className={`nav-button ${activeTab === 'gallery' ? 'active' : ''}`}
+      {/* Tab Bar */}
+      <div className="tab-bar">
+        <div
+          className={`tab ${activeTab === 'gallery' ? 'active' : ''}`}
           onClick={() => setActiveTab('gallery')}
         >
           GALLERY
-        </button>
-        <button
-          className={`nav-button ${activeTab === 'settings' ? 'active' : ''}`}
+        </div>
+        <div
+          className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveTab('settings')}
         >
           SETTINGS
-        </button>
+        </div>
+      </div>
+
+      {/* Status Bar */}
+      <div className="status-bar">
+        <div className="status-item">
+          <span>STATUS:</span>
+          <span id="status">READY</span>
+        </div>
+        <div className="status-item">
+          <span>PHOTOS:</span>
+          <span id="photo-count">{photoCount}</span>
+        </div>
+        <div className="status-item">
+          <span className="blink">█</span>
+        </div>
       </div>
     </div>
   );

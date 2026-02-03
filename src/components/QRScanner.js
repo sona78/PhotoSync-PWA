@@ -13,34 +13,28 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
   const shouldStartCamera = useRef(false);
 
   const validateQRPayload = (payload) => {
-    // Validate structure
-    if (!payload.v || !payload.s || !payload.p || !payload.t) {
-      throw new Error('Invalid QR code format - missing required fields');
+    // Validate WebRTC QR code format
+    if (!payload.type || payload.type !== 'webrtc') {
+      throw new Error('Invalid QR code format - expected WebRTC connection');
     }
 
-    // Validate version (only support v3 - WSS)
-    if (payload.v !== 3) {
-      throw new Error(`Unsupported QR code version: ${payload.v} (only v3/WSS supported)`);
+    // Validate required fields
+    if (!payload.signalingServer) {
+      throw new Error('Missing signaling server URL');
     }
 
-    // Validate token format (64 hex characters)
-    if (!/^[a-f0-9]{64}$/i.test(payload.t)) {
-      throw new Error('Invalid token format');
+    if (!payload.roomId) {
+      throw new Error('Missing room ID');
     }
 
-    // Validate expiration
-    if (payload.e && payload.e < Date.now()) {
-      throw new Error('QR code has expired');
+    // Validate signaling server URL format
+    if (!/^wss?:\/\/.+/.test(payload.signalingServer)) {
+      throw new Error('Invalid signaling server URL - must start with ws:// or wss://');
     }
 
-    // Validate server address (basic)
-    if (!/^[\d.]+$/.test(payload.s) && !/^[a-z0-9.-]+$/i.test(payload.s)) {
-      throw new Error('Invalid server address');
-    }
-
-    // Validate port
-    if (typeof payload.p !== 'number' || payload.p < 1 || payload.p > 65535) {
-      throw new Error('Invalid port number');
+    // Validate room ID format (should be hex string)
+    if (!/^[a-f0-9]+$/i.test(payload.roomId)) {
+      throw new Error('Invalid room ID format');
     }
 
     return true;
@@ -183,31 +177,17 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
     try {
       setError(null);
 
-      // Parse server address and port
-      const serverParts = manualServer.split(':');
-      const address = serverParts[0].trim();
-      const port = serverParts[1] ? parseInt(serverParts[1].trim()) : 3001;
-
-      // Validate inputs
-      if (!address) {
-        throw new Error('Server address is required');
+      // For WebRTC, manual entry requires signaling server and room ID
+      if (!manualServer || !manualToken) {
+        throw new Error('Both signaling server and room ID are required');
       }
 
-      if (!manualToken || manualToken.length !== 64) {
-        throw new Error('Token must be 64 characters');
-      }
-
-      if (!/^[a-f0-9]{64}$/i.test(manualToken)) {
-        throw new Error('Token must be hexadecimal (0-9, a-f)');
-      }
-
-      // Create payload
+      // Create WebRTC payload
       const payload = {
-        v: 1,
-        s: address,
-        p: port,
-        t: manualToken.toLowerCase(),
-        e: Date.now() + (90 * 24 * 60 * 60 * 1000) // 90 days from now
+        type: 'webrtc',
+        signalingServer: manualServer.trim(),
+        roomId: manualToken.trim(),
+        version: '1.0'
       };
 
       validateQRPayload(payload);
@@ -294,35 +274,34 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
 
       {useManualEntry && !scanning && (
         <div className="manual-entry">
-          <h3>MANUAL PAIRING</h3>
+          <h3>MANUAL WEBRTC CONNECTION</h3>
           <p className="manual-instructions">
-            Enter the server address and token from your Electron app
+            Enter the WebRTC connection details from your Electron app terminal
           </p>
           <form onSubmit={handleManualSubmit}>
             <div className="form-group">
-              <label>SERVER ADDRESS (IP:PORT)</label>
+              <label>SIGNALING SERVER URL</label>
               <input
                 type="text"
                 value={manualServer}
                 onChange={(e) => setManualServer(e.target.value)}
-                placeholder="192.168.1.5:3001"
+                placeholder="wss://your-signaling-server.com"
                 className="manual-input"
                 required
               />
-              <small>Example: 192.168.1.5:3001 (port defaults to 3001)</small>
+              <small>Example: wss://photosync-signaling.onrender.com</small>
             </div>
             <div className="form-group">
-              <label>DEVICE TOKEN</label>
+              <label>ROOM ID</label>
               <input
                 type="text"
                 value={manualToken}
                 onChange={(e) => setManualToken(e.target.value)}
-                placeholder="64-character hex token"
+                placeholder="abc123..."
                 className="manual-input"
-                maxLength="64"
                 required
               />
-              <small>64 characters (0-9, a-f)</small>
+              <small>Room ID shown in desktop terminal</small>
             </div>
             <div className="button-group">
               <button type="submit" className="scan-button">

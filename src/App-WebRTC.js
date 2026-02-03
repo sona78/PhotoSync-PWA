@@ -6,7 +6,13 @@ import QRScanner from './components/QRScanner';
 import DebugLog from './components/DebugLog';
 import ConnectionDiagnostics from './components/ConnectionDiagnostics';
 import { supabase } from './lib/supabase';
+import { usePhotoSync } from './hooks/usePhotoSync';
 import { usePhotoSyncWebRTC } from './hooks/usePhotoSyncWebRTC';
+
+// Signaling server configuration
+// For local testing: ws://localhost:3002
+// For production: wss://your-signaling-server.onrender.com
+const SIGNALING_SERVER = process.env.REACT_APP_SIGNALING_SERVER || 'ws://localhost:3002';
 
 function App() {
   const [activeTab, setActiveTab] = useState('gallery');
@@ -15,9 +21,41 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showDebugLogs, setShowDebugLogs] = useState(false);
+  const [connectionMode, setConnectionMode] = useState(null); // 'legacy' or 'webrtc'
 
-  // WebRTC P2P connection (only connection method)
-  const activeSync = usePhotoSyncWebRTC();
+  // Debug: Log connectionMode changes
+  useEffect(() => {
+    console.log('[App] connectionMode changed to:', connectionMode);
+  }, [connectionMode]);
+
+  // Legacy Socket.IO connection
+  const legacySync = usePhotoSync();
+
+  // WebRTC P2P connection
+  const webrtcSync = usePhotoSyncWebRTC();
+
+  // Debug: Log what webrtcSync contains IMMEDIATELY
+  console.log('[App] webrtcSync IMMEDIATE check:', {
+    hookResult: webrtcSync,
+    hasConnect: !!webrtcSync?.connect,
+    hasRequestPhoto: !!webrtcSync?.requestPhoto,
+    hasPhotoData: !!webrtcSync?.photoData,
+    requestPhotoType: typeof webrtcSync?.requestPhoto,
+    photoDataType: typeof webrtcSync?.photoData,
+    photoDataValue: webrtcSync?.photoData,
+    connectionState: webrtcSync?.connectionState
+  });
+
+  // Use the active connection mode
+  const activeSync = connectionMode === 'webrtc' ? webrtcSync : legacySync;
+
+  // Debug connectionMode
+  useEffect(() => {
+    console.log('[App] Connection mode:', connectionMode);
+    console.log('[App] Using:', connectionMode === 'webrtc' ? 'WebRTC' : 'Legacy');
+    console.log('[App] webrtcSync.requestPhoto exists:', !!webrtcSync.requestPhoto);
+    console.log('[App] legacySync.requestPhoto exists:', !!legacySync.requestPhoto);
+  }, [connectionMode]);
 
   const {
     connectionState,
@@ -28,7 +66,22 @@ function App() {
     error: syncError,
     syncProgress,
     debugLogs,
+    photoData,
+    requestPhoto,
   } = activeSync;
+
+  // Debug: Log props being passed to Gallery
+  useEffect(() => {
+    if (connectionState === 'connected') {
+      console.log('[App] Gallery props:', {
+        connectionMode,
+        photosCount: photos?.length,
+        hasPhotoData: !!photoData,
+        photoDataKeys: photoData ? Object.keys(photoData).length : 0,
+        hasRequestPhoto: !!requestPhoto
+      });
+    }
+  }, [connectionState, connectionMode, photos, photoData, requestPhoto]);
 
   // Update photo count when photos change
   useEffect(() => {
@@ -78,9 +131,18 @@ function App() {
     console.log('QR scanned successfully:', payload);
     setShowQRScanner(false);
 
-    // WebRTC P2P connection
-    console.log('Connecting with WebRTC P2P');
-    activeSync.connect(payload.signalingServer, payload.roomId);
+    // Detect connection type
+    if (payload.type === 'webrtc') {
+      // WebRTC connection
+      console.log('Using WebRTC mode');
+      setConnectionMode('webrtc');
+      webrtcSync.connect(payload.signalingServer, payload.roomId);
+    } else {
+      // Legacy direct connection
+      console.log('Using legacy mode');
+      setConnectionMode('legacy');
+      legacySync.connect(payload.s, payload.p, payload.t);
+    }
   };
 
   const handleQRScanError = (error) => {
@@ -90,13 +152,14 @@ function App() {
   const handleDisconnect = () => {
     if (window.confirm('Disconnect from server? You will need to scan the QR code again to reconnect.')) {
       disconnect();
+      setConnectionMode(null);
     }
   };
 
   const clearLogs = () => {
-    // Clear logs if available
-    if (activeSync.clearLogs) {
-      activeSync.clearLogs();
+    // Clear logs is not available on webrtcSync, only on legacySync
+    if (legacySync.clearLogs) {
+      legacySync.clearLogs();
     }
   };
 
@@ -126,16 +189,16 @@ function App() {
     <div className="container">
       <div className="header">
         PHOTOSYNC
-        {connectionState === 'connected' && (
+        {connectionMode && (
           <span style={{
             fontSize: '12px',
             marginLeft: '10px',
             padding: '4px 8px',
-            background: '#00ff00',
+            background: connectionMode === 'webrtc' ? '#00ff00' : '#ffff00',
             color: '#000',
             borderRadius: '4px',
           }}>
-            🔗 WebRTC P2P
+            {connectionMode === 'webrtc' ? '🔗 WebRTC' : '📡 Direct'}
           </span>
         )}
       </div>
@@ -150,6 +213,9 @@ function App() {
             error={syncError}
             syncProgress={syncProgress}
             requestManifest={requestManifest}
+            photoData={photoData}
+            requestPhoto={requestPhoto}
+            connectionMode={connectionMode}
           />
         </div>
 
@@ -169,11 +235,23 @@ function App() {
             <ConnectionDiagnostics
               debugLogs={debugLogs}
               connectionState={connectionState}
-              serverInfo={activeSync.connectionInfo ? {
-                address: activeSync.connectionInfo.signalingServer,
-                port: null,
-                mode: 'WebRTC P2P'
-              } : null}
+              serverInfo={(() => {
+                if (connectionMode === 'webrtc' && webrtcSync.connectionInfo) {
+                  return {
+                    address: webrtcSync.connectionInfo.signalingServer,
+                    port: null,
+                    mode: 'WebRTC P2P'
+                  };
+                }
+                try {
+                  const saved = localStorage.getItem('photosync_server');
+                  if (saved) {
+                    const { address, port } = JSON.parse(saved);
+                    return { address, port, mode: 'Direct' };
+                  }
+                } catch (e) {}
+                return null;
+              })()}
             />
 
             {connectionState === 'disconnected' && !showQRScanner && (
@@ -205,6 +283,50 @@ function App() {
                   }}
                 >
                   PAIR NEW DEVICE
+                </button>
+
+                {/* TEMPORARY TEST BUTTON FOR WEBRTC */}
+                <button
+                  onClick={async () => {
+                    const roomId = prompt('Enter Room ID from desktop terminal:\n\nLook for:\n[WebRTC] Room ID: xxxxxxxxxx');
+                    if (roomId && roomId.trim()) {
+                      console.log('🧪 TEST: Setting connection mode to WebRTC');
+                      console.log('🧪 TEST: Signaling server:', SIGNALING_SERVER);
+                      console.log('🧪 TEST: webrtcSync object:', webrtcSync);
+                      console.log('🧪 TEST: webrtcSync.connect type:', typeof webrtcSync.connect);
+                      console.log('🧪 TEST: webrtcSync.requestPhoto type:', typeof webrtcSync.requestPhoto);
+                      console.log('🧪 TEST: webrtcSync.photoData type:', typeof webrtcSync.photoData);
+
+                      // Set mode FIRST, then connect
+                      await new Promise(resolve => {
+                        setConnectionMode('webrtc');
+                        setTimeout(resolve, 100); // Give React time to update state
+                      });
+
+                      console.log('🧪 TEST: ConnectionMode set, now connecting to room:', roomId.trim());
+                      webrtcSync.connect(SIGNALING_SERVER, roomId.trim());
+                    }
+                  }}
+                  style={{
+                    fontFamily: "'VT323', monospace",
+                    fontSize: '18px',
+                    padding: '12px 20px',
+                    background: '#ffff00',
+                    color: '#000',
+                    border: '3px solid #000',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase',
+                    width: '100%',
+                    marginTop: '15px',
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#ffcc00';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#ffff00';
+                  }}
+                >
+                  🧪 TEST WEBRTC (MANUAL CONNECT)
                 </button>
               </div>
             )}
@@ -252,9 +374,11 @@ function App() {
                   }}>
                     {connectionState.toUpperCase()}
                   </p>
-                  <p className="info-text" style={{ marginBottom: '10px', fontSize: '14px' }}>
-                    MODE: WebRTC P2P
-                  </p>
+                  {connectionMode && (
+                    <p className="info-text" style={{ marginBottom: '10px', fontSize: '14px' }}>
+                      MODE: {connectionMode === 'webrtc' ? 'WebRTC P2P' : 'Direct Connection'}
+                    </p>
+                  )}
                   {connectionState === 'connected' && (
                     <p className="info-text" style={{ fontSize: '16px' }}>
                       PHOTOS SYNCED: {photoCount}
@@ -371,19 +495,19 @@ function App() {
       </div>
 
       {/* Bottom Navigation */}
-      <div className="bottom-nav">
-        <button
-          className={`nav-button ${activeTab === 'gallery' ? 'active' : ''}`}
+      <div className="tab-bar">
+        <div
+          className={`tab ${activeTab === 'gallery' ? 'active' : ''}`}
           onClick={() => setActiveTab('gallery')}
         >
           GALLERY
-        </button>
-        <button
-          className={`nav-button ${activeTab === 'settings' ? 'active' : ''}`}
+        </div>
+        <div
+          className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveTab('settings')}
         >
           SETTINGS
-        </button>
+        </div>
       </div>
     </div>
   );

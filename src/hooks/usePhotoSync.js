@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { encode, decode } from '@msgpack/msgpack';
+import { io } from 'socket.io-client';
+import CryptoJS from 'crypto-js';
 import { saveDeviceConnection, loadDeviceConnection, deleteDeviceConnection, updateLastConnected } from '../lib/deviceConnections';
 
 const CONNECTION_STATES = {
   DISCONNECTED: 'disconnected',
   CONNECTING: 'connecting',
-  AUTHENTICATING: 'authenticating',
   CONNECTED: 'connected',
   ERROR: 'error'
 };
@@ -17,391 +17,353 @@ export const usePhotoSync = () => {
   const [error, setError] = useState(null);
   const [debugLogs, setDebugLogs] = useState([]);
 
-  const wsRef = useRef(null);
+  const socketRef = useRef(null);
   const tokenRef = useRef(null);
   const serverRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
-  const photoBuffersRef = useRef(new Map());
+  const connectRef = useRef(null);
 
-  // Debug logging function
-  const addLog = useCallback((level, message) => {
-    const timestamp = new Date().toLocaleTimeString();
-    const logEntry = { level, message, timestamp };
+  // Debug logging function with enhanced metadata
+  const addLog = useCallback((level, message, metadata = {}) => {
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      level,
+      message,
+      timestamp,
+      ...metadata
+    };
 
-    // Also log to console
-    const consoleMsg = `[PhotoSync] ${message}`;
+    // Also log to console with metadata
+    const consoleMsg = `[PhotoSync ${timestamp}] ${message}`;
+    const consoleData = Object.keys(metadata).length > 0 ? metadata : undefined;
+
     if (level === 'error') {
-      console.error(consoleMsg);
+      console.error(consoleMsg, consoleData || '');
     } else if (level === 'warn') {
-      console.warn(consoleMsg);
+      console.warn(consoleMsg, consoleData || '');
     } else {
-      console.log(consoleMsg);
+      console.log(consoleMsg, consoleData || '');
     }
 
-    setDebugLogs(prev => [...prev.slice(-99), logEntry]); // Keep last 100 logs
-  }, []);
-
-  // Photo chunk reassembly
-  const handlePhotoChunk = useCallback((message) => {
-    const { photoId, chunkSeq, totalChunks, totalSize, data } = message;
-
-    if (!photoBuffersRef.current.has(photoId)) {
-      photoBuffersRef.current.set(photoId, {
-        chunks: new Array(totalChunks),
-        expectedChunks: totalChunks,
-        receivedChunks: 0,
-        totalSize
-      });
-    }
-
-    const buffer = photoBuffersRef.current.get(photoId);
-    buffer.chunks[chunkSeq] = data;
-    buffer.receivedChunks++;
-
-    // Update progress
-    setSyncProgress({
-      current: buffer.receivedChunks,
-      total: totalChunks
-    });
-  }, []);
-
-  const handlePhotoComplete = useCallback((message) => {
-    const { photoId, totalSize } = message;
-    const buffer = photoBuffersRef.current.get(photoId);
-
-    if (!buffer) {
-      console.error('[PhotoSync] No buffer for completed photo:', photoId);
-      return;
-    }
-
-    // Concatenate chunks
-    const fullData = new Uint8Array(totalSize);
-    let offset = 0;
-    for (const chunk of buffer.chunks) {
-      if (chunk) {
-        fullData.set(new Uint8Array(chunk), offset);
-        offset += chunk.byteLength;
-      }
-    }
-
-    // Create blob and object URL
-    const blob = new Blob([fullData], { type: 'image/jpeg' });
-    const url = URL.createObjectURL(blob);
-
-    // Update photos array with actual image data
-    setPhotos(prev => prev.map(p =>
-      p.id === photoId ? { ...p, url, thumbnail: url } : p
-    ));
-
-    // Cleanup
-    photoBuffersRef.current.delete(photoId);
-  }, []);
-
-  // Request manifest
-  const requestManifest = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const message = encode({
-        type: 'REQUEST_MANIFEST',
-        requestId: Date.now(),
-        timestamp: Date.now()
-      });
-      wsRef.current.send(message);
-    }
+    setDebugLogs(prev => [...prev.slice(-199), logEntry]); // Keep last 200 logs
   }, []);
 
   // Request photo batch
   const requestBatch = useCallback((photoIds, quality = 60, maxDimension = 1920) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const message = encode({
-        type: 'REQUEST_BATCH',
-        requestId: Date.now(),
+    if (socketRef.current?.connected) {
+      addLog('info', `Requesting batch: ${photoIds.length} photos`, {
+        quality,
+        maxDimension
+      });
+
+      socketRef.current.emit('photos:request-batch', {
         photoIds,
         quality,
-        maxDimension,
-        timestamp: Date.now()
-      });
-      wsRef.current.send(message);
-    }
-  }, []);
-
-  // Handle incoming messages
-  const handleMessage = useCallback((message) => {
-    switch (message.type) {
-      case 'AUTH_RESPONSE':
-        if (message.success) {
-          addLog('info', 'Authentication successful!');
-          setConnectionState(CONNECTION_STATES.CONNECTED);
-          setError(null);
-          // Update last connected timestamp in Supabase
-          updateLastConnected().catch(err => {
-            addLog('warn', `Failed to update last connected timestamp: ${err}`);
-          });
-          // Request manifest
-          requestManifest();
-        } else {
-          addLog('error', `Authentication failed: ${message.reason}`);
-          const errorMessages = {
-            'INVALID_FORMAT': 'Invalid token format',
-            'TOKEN_NOT_FOUND': 'Token not found or invalid',
-            'TOKEN_REVOKED': 'Token has been revoked',
-            'TOKEN_EXPIRED': 'Token has expired',
-            'RATE_LIMIT_EXCEEDED': `Too many attempts. Try again in ${message.retryAfter} seconds`,
-            'MISSING_TOKEN': 'Missing authentication token'
-          };
-          setError(errorMessages[message.reason] || `Authentication failed: ${message.reason}`);
-          setConnectionState(CONNECTION_STATES.ERROR);
-          wsRef.current?.close(1000, 'Auth failed');
+        maxDimension
+      }, (response) => {
+        if (response.error) {
+          addLog('error', 'Batch request failed', response.error);
+          setError(response.error.message);
         }
-        break;
+      });
+    }
+  }, [addLog]);
 
-      case 'MANIFEST_RESPONSE':
-        addLog('info', `Received manifest: ${message.count} photos`);
+  // Request manifest with acknowledgment
+  const requestManifest = useCallback(() => {
+    if (socketRef.current?.connected) {
+      addLog('info', 'Requesting manifest...');
+      socketRef.current.emit('manifest:request', {}, (response) => {
+        if (response.error) {
+          addLog('error', 'Manifest request failed', response.error);
+          setError(response.error.message);
+          return;
+        }
 
-        // Clean up old blob URLs before replacing photos
+        addLog('info', `Received manifest: ${response.count} photos`, {
+          hash: response.hash
+        });
+
+        // Clean up old blob URLs
         setPhotos(prevPhotos => {
           prevPhotos.forEach(photo => {
-            if (photo.url && photo.url.startsWith('blob:')) {
+            if (photo.url?.startsWith('blob:')) {
               URL.revokeObjectURL(photo.url);
             }
-            if (photo.thumbnail && photo.thumbnail.startsWith('blob:') && photo.thumbnail !== photo.url) {
+            if (photo.thumbnail?.startsWith('blob:') && photo.thumbnail !== photo.url) {
               URL.revokeObjectURL(photo.thumbnail);
             }
           });
-          return message.photos || [];
+          return response.photos || [];
         });
 
-        // Clear any pending photo buffers
-        photoBuffersRef.current.clear();
-
-        // Request batch of all photos (compressed thumbnails)
-        if (message.photos && message.photos.length > 0) {
-          const photoIds = message.photos.map(p => p.id);
-          requestBatch(photoIds, 60, 400); // Quality 60, max 400px
+        // Auto-request thumbnails
+        if (response.photos?.length > 0) {
+          const photoIds = response.photos.map(p => p.id);
+          requestBatch(photoIds, 60, 400); // Quality 60, max 400px for thumbnails
         }
-        break;
-
-      case 'PHOTO_DATA':
-        handlePhotoChunk(message);
-        break;
-
-      case 'PHOTO_COMPLETE':
-        handlePhotoComplete(message);
-        break;
-
-      case 'AUTH_REVOKED':
-        console.warn('[PhotoSync] Token revoked:', message.reason);
-        setError('Device token has been revoked');
-        setConnectionState(CONNECTION_STATES.ERROR);
-        // Remove from both Supabase and localStorage
-        deleteDeviceConnection().catch(err => {
-          console.warn('[PhotoSync] Failed to delete revoked connection from Supabase:', err);
-        });
-        localStorage.removeItem('photosync_server');
-        break;
-
-      case 'ERROR':
-        console.error('[PhotoSync] Server error:', message.code, message.message);
-        if (message.code === 'AUTH_REQUIRED' || message.code === 'AUTH_TIMEOUT') {
-          setError('Authentication failed');
-          setConnectionState(CONNECTION_STATES.ERROR);
-        } else {
-          setError(message.message);
-        }
-        break;
-
-      case 'PONG':
-        // Heartbeat response
-        break;
-
-      case 'MANIFEST_UPDATE':
-        console.log(`[PhotoSync] Server notified manifest update:`, message);
-        console.log(`  - Reason: ${message.reason}`);
-        console.log(`  - Photo count: ${message.previousCount} -> ${message.currentCount}`);
-
-        // Automatically request fresh manifest
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          addLog('info', 'Manifest update detected, requesting fresh data...');
-          requestManifest();
-        }
-        break;
-
-      default:
-        addLog('warn', `Unknown message type: ${message.type}`);
+      });
     }
-  }, [handlePhotoChunk, handlePhotoComplete, requestBatch, requestManifest, addLog]);
+  }, [addLog, requestBatch]);
 
-  // Store connect function in ref to avoid circular dependency
-  const connectRef = useRef(null);
+  // Photo data handler - receives binary chunks
+  const photoBuffersRef = useRef(new Map());
 
-  // Auto-reconnect logic
-  const scheduleReconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) return;
+  const setupPhotoHandlers = useCallback((socket) => {
+    // Photo data chunks
+    socket.on('photo:data', (data) => {
+      const { photoId, chunk, totalSize, checksum, mimeType } = data;
 
-    reconnectTimeoutRef.current = setTimeout(async () => {
-      reconnectTimeoutRef.current = null;
+      // Initialize buffer if first chunk
+      if (!photoBuffersRef.current.has(photoId)) {
+        photoBuffersRef.current.set(photoId, {
+          chunks: [],
+          receivedSize: 0,
+          totalSize,
+          checksum,
+          mimeType: mimeType || 'image/jpeg'
+        });
+        addLog('info', `Receiving photo: ${photoId}`, { totalSize, mimeType });
+      }
 
-      // Try loading from Supabase first
-      const supabaseResult = await loadDeviceConnection();
-      if (supabaseResult.success && supabaseResult.data && connectRef.current) {
-        const { serverAddress, serverPort, authToken } = supabaseResult.data;
-        addLog('info', `Attempting reconnect with Supabase credentials to ${serverAddress}:${serverPort}`);
-        connectRef.current(serverAddress, serverPort, authToken);
+      const buffer = photoBuffersRef.current.get(photoId);
+      buffer.chunks.push(chunk);
+      buffer.receivedSize += chunk.byteLength || chunk.length;
+
+      // Update progress
+      setSyncProgress({
+        current: buffer.receivedSize,
+        total: totalSize
+      });
+    });
+
+    // Photo complete - assemble and validate
+    socket.on('photo:complete', ({ photoId, totalSize, checksum }) => {
+      const buffer = photoBuffersRef.current.get(photoId);
+
+      if (!buffer) {
+        addLog('error', `No buffer for completed photo: ${photoId}`);
         return;
       }
 
-      // Fall back to localStorage
-      const saved = localStorage.getItem('photosync_server');
-      if (saved && connectRef.current) {
-        const { address, port, token } = JSON.parse(saved);
-        addLog('info', `Attempting reconnect with localStorage credentials to ${address}:${port}`);
-        connectRef.current(address, port, token);
+      // Concatenate chunks
+      const fullData = new Uint8Array(totalSize);
+      let offset = 0;
+      for (const chunk of buffer.chunks) {
+        const uint8Chunk = chunk instanceof ArrayBuffer ? new Uint8Array(chunk) : new Uint8Array(chunk);
+        fullData.set(uint8Chunk, offset);
+        offset += uint8Chunk.length;
       }
-    }, 5000); // 5 second delay
+
+      // Validate checksum
+      const wordArray = CryptoJS.lib.WordArray.create(fullData);
+      const hash = CryptoJS.MD5(wordArray).toString();
+
+      if (hash !== checksum) {
+        addLog('error', `Checksum mismatch for photo ${photoId}`, {
+          expected: checksum,
+          actual: hash
+        });
+        photoBuffersRef.current.delete(photoId);
+        return;
+      }
+
+      // Create blob URL
+      const blob = new Blob([fullData], { type: buffer.mimeType });
+      const url = URL.createObjectURL(blob);
+
+      // Update photos
+      setPhotos(prev => prev.map(p =>
+        p.id === photoId ? { ...p, url, thumbnail: url } : p
+      ));
+
+      addLog('info', `Photo received: ${photoId}`, {
+        size: totalSize,
+        checksumValid: true
+      });
+
+      // Cleanup
+      photoBuffersRef.current.delete(photoId);
+    });
   }, [addLog]);
 
-  // Connect to server with token
+  // Connect function
   const connect = useCallback(async (serverAddress, port, token, deviceName = null) => {
-    if (wsRef.current) {
-      console.warn('[PhotoSync] Already connected');
+    if (socketRef.current?.connected) {
+      addLog('warn', 'Already connected or connecting');
       return;
     }
-
-    // Store connection details
-    tokenRef.current = token;
-    serverRef.current = { address: serverAddress, port };
-
-    // Save to Supabase for persistence across devices
-    const actualDeviceName = deviceName || getDeviceName();
-    const saveResult = await saveDeviceConnection(actualDeviceName, serverAddress, port, token);
-    if (!saveResult.success) {
-      console.warn('[PhotoSync] Failed to save connection to Supabase:', saveResult.error);
-      // Continue anyway - we'll fall back to memory-only storage
-    }
-
-    // Also keep in localStorage as backup
-    localStorage.setItem('photosync_server', JSON.stringify({
-      address: serverAddress,
-      port,
-      token
-    }));
 
     setConnectionState(CONNECTION_STATES.CONNECTING);
     setError(null);
 
-    // Always use wss:// (secure WebSocket)
     const wsUrl = `wss://${serverAddress}:${port}`;
-    addLog('info', `Connecting to: ${wsUrl}`);
-    addLog('info', `Network status: ${navigator.onLine ? 'Online' : 'Offline'}`);
-    addLog('info', `Page protocol: ${window.location.protocol}`);
-    addLog('info', `User agent: ${navigator.userAgent}`)
+    const actualDeviceName = deviceName || getDeviceName();
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    addLog('info', 'Connecting to Socket.IO server...', {
+      url: wsUrl,
+      deviceName: actualDeviceName
+    });
 
-    // Set connection timeout
-    const connectionTimeout = setTimeout(() => {
-      if (ws.readyState !== WebSocket.OPEN) {
-        addLog('error', 'Connection timeout - no response from server');
-        const timeoutMsg = `Connection timeout to ${serverAddress}:${port}. Check that server is running and reachable from your phone's network.`;
-        setError(timeoutMsg);
-        setConnectionState(CONNECTION_STATES.ERROR);
-        ws.close();
-      }
-    }, 10000); // 10 second timeout
+    // Save connection details
+    try {
+      await saveDeviceConnection(actualDeviceName, serverAddress, port, token);
+      localStorage.setItem('photosync_server', JSON.stringify({
+        address: serverAddress,
+        port,
+        token
+      }));
+    } catch (err) {
+      addLog('warn', `Failed to save connection details: ${err.message}`);
+    }
 
-    ws.onopen = () => {
-      clearTimeout(connectionTimeout);
-      addLog('info', 'WebSocket connected! Sending authentication...');
-      setConnectionState(CONNECTION_STATES.AUTHENTICATING);
-
-      // Send AUTH message (MessagePack encoded)
-      const authMessage = encode({
-        type: 'AUTH',
-        token: token,
-        deviceName: getDeviceName(),
+    // Create Socket.IO client
+    const socket = io(wsUrl, {
+      auth: {
+        token,
+        deviceName: actualDeviceName,
         version: '1.0.0'
+      },
+      transports: ['polling', 'websocket'], // Try polling first, then upgrade to websocket
+      reconnection: true,
+      reconnectionDelay: 5000,
+      reconnectionAttempts: Infinity,
+      upgrade: true, // Allow upgrade from polling to websocket
+      rememberUpgrade: true // Remember successful upgrades
+    });
+
+    socketRef.current = socket;
+    tokenRef.current = token;
+    serverRef.current = { address: serverAddress, port };
+
+    // Connection success
+    socket.on('connect', () => {
+      addLog('info', '✅ Connected and authenticated!', {
+        socketId: socket.id
+      });
+      setConnectionState(CONNECTION_STATES.CONNECTED);
+      setError(null);
+
+      // Update last connected timestamp
+      updateLastConnected().catch(err => {
+        addLog('warn', `Failed to update last connected timestamp: ${err.message}`);
       });
 
-      ws.send(authMessage);
-    };
+      // Request manifest
+      requestManifest();
+    });
 
-    ws.onmessage = (event) => {
-      try {
-        // Decode MessagePack
-        event.data.arrayBuffer().then(buffer => {
-          const message = decode(new Uint8Array(buffer));
-          handleMessage(message);
-        });
-      } catch (err) {
-        console.error('[PhotoSync] Message decode error:', err);
-      }
-    };
+    // Connection error (auth failed or connection issue)
+    socket.on('connect_error', (error) => {
+      const errorMsg = error.message;
+      addLog('error', 'Connection failed', { error: errorMsg });
 
-    ws.onerror = (err) => {
-      clearTimeout(connectionTimeout);
-      addLog('error', `WebSocket error: ${err.type || 'Connection failed'}`);
-
-      // Provide more helpful error messages
-      let errorMessage = `Cannot connect to ${serverAddress}:${port}. `;
-
-      // Check if it's a network reachability issue
-      if (!navigator.onLine) {
-        errorMessage += 'No internet connection detected.';
-        addLog('error', 'Device is offline - no internet connection');
+      // Parse error codes
+      if (errorMsg.startsWith('RATE_LIMIT_EXCEEDED:')) {
+        const retryAfter = errorMsg.split(':')[1];
+        setError(`Too many authentication attempts. Try again in ${retryAfter} seconds`);
+      } else if (errorMsg === 'INVALID_TOKEN') {
+        setError('Invalid authentication token. Please pair again.');
+      } else if (errorMsg === 'TOKEN_EXPIRED') {
+        setError('Token has expired. Please pair again.');
+      } else if (errorMsg === 'TOKEN_REVOKED') {
+        setError('Token has been revoked. Please pair again.');
+      } else if (errorMsg === 'TOKEN_NOT_FOUND') {
+        setError('Token not found. Please pair again.');
       } else {
-        errorMessage += 'Check that: (1) Server is running, (2) Phone and server are on same WiFi network, (3) Firewall allows connections.';
-        addLog('error', 'Connection failed. Possible causes: server not running, wrong network, or firewall blocking');
+        setError(`Cannot connect to server: ${errorMsg}`);
       }
 
-      setError(errorMessage);
       setConnectionState(CONNECTION_STATES.ERROR);
-    };
+    });
 
-    ws.onclose = (event) => {
-      clearTimeout(connectionTimeout);
-      addLog('warn', `WebSocket closed - Code: ${event.code}, Reason: ${event.reason || 'None'}`);
-      wsRef.current = null;
+    // Disconnection
+    socket.on('disconnect', (reason) => {
+      addLog('warn', 'Disconnected from server', { reason });
       setConnectionState(CONNECTION_STATES.DISCONNECTED);
 
-      // Auto-reconnect if not intentional disconnect
-      if (event.code !== 1000) { // Not normal closure
-        addLog('info', 'Scheduling reconnect in 5 seconds...');
-        scheduleReconnect();
+      // Socket.IO handles reconnection automatically
+      // Only need manual reconnect if server forced disconnect
+      if (reason === 'io server disconnect') {
+        addLog('info', 'Server disconnected. Will attempt to reconnect...');
+        // Auto-reconnect is enabled, so it will retry
       }
-    };
-  }, [handleMessage, scheduleReconnect, addLog]);
+    });
 
-  // Store connect in ref for scheduleReconnect
-  useEffect(() => {
-    connectRef.current = connect;
-  }, [connect]);
+    // Manifest update broadcast
+    socket.on('manifest:updated', (data) => {
+      addLog('info', 'Manifest updated by server', data);
+      requestManifest();
+    });
 
-  // Disconnect
+    // Auth revoked
+    socket.on('auth:revoked', (data) => {
+      addLog('error', 'Token revoked by server', data);
+      setError('Device token has been revoked. Please pair again.');
+      setConnectionState(CONNECTION_STATES.ERROR);
+
+      deleteDeviceConnection();
+      localStorage.removeItem('photosync_server');
+      socket.disconnect();
+    });
+
+    // Batch events
+    socket.on('photos:batch-started', ({ totalPhotos, estimatedTime }) => {
+      addLog('info', `Batch started: ${totalPhotos} photos`, {
+        estimatedTime: estimatedTime + 's'
+      });
+    });
+
+    socket.on('photos:batch-progress', ({ completed, total }) => {
+      addLog('info', `Batch progress: ${completed}/${total}`);
+    });
+
+    // Photo events
+    socket.on('photo:complete', ({ photoId, totalSize, checksum }) => {
+      addLog('info', `Photo complete: ${photoId}`, {
+        totalSize,
+        checksum
+      });
+    });
+
+    socket.on('photo:error', ({ photoId, code, message }) => {
+      addLog('error', `Photo error: ${photoId}`, {
+        code,
+        message
+      });
+    });
+
+    // Generic error event
+    socket.on('error', (error) => {
+      addLog('error', 'Socket error', { error: error.message || error });
+    });
+
+    // Setup photo handlers
+    setupPhotoHandlers(socket);
+  }, [addLog, requestManifest, setupPhotoHandlers]);
+
+  // Disconnect function
   const disconnect = useCallback(async () => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'User disconnect');
-      wsRef.current = null;
+    if (socketRef.current) {
+      addLog('info', 'Disconnecting...');
+      socketRef.current.disconnect();
+      socketRef.current = null;
     }
 
-    // Remove from both Supabase and localStorage
-    const deleteResult = await deleteDeviceConnection();
-    if (!deleteResult.success) {
-      console.warn('[PhotoSync] Failed to delete connection from Supabase:', deleteResult.error);
-    }
+    tokenRef.current = null;
+    serverRef.current = null;
+
+    await deleteDeviceConnection();
     localStorage.removeItem('photosync_server');
 
     setConnectionState(CONNECTION_STATES.DISCONNECTED);
 
-    // Cleanup blob URLs before clearing photos
+    // Clean up blob URLs
     setPhotos(prevPhotos => {
       prevPhotos.forEach(photo => {
-        if (photo.url && photo.url.startsWith('blob:')) {
+        if (photo.url?.startsWith('blob:')) {
           URL.revokeObjectURL(photo.url);
         }
-        if (photo.thumbnail && photo.thumbnail.startsWith('blob:') && photo.thumbnail !== photo.url) {
+        if (photo.thumbnail?.startsWith('blob:') && photo.thumbnail !== photo.url) {
           URL.revokeObjectURL(photo.thumbnail);
         }
       });
@@ -409,19 +371,23 @@ export const usePhotoSync = () => {
     });
 
     setError(null);
-  }, []);
+    addLog('info', 'Disconnected');
+  }, [addLog]);
 
-  // Auto-connect on mount if credentials exist
+  // Store connect function in ref for auto-connect
+  connectRef.current = connect;
+
+  // Auto-connect on mount
   useEffect(() => {
     const attemptAutoConnect = async () => {
       addLog('info', 'Checking for saved connection...');
 
-      // Try loading from Supabase first
+      // Try Supabase first
       const supabaseResult = await loadDeviceConnection();
       if (supabaseResult.success && supabaseResult.data) {
         const { serverAddress, serverPort, authToken } = supabaseResult.data;
         addLog('info', `Found Supabase credentials for ${serverAddress}:${serverPort}`);
-        connect(serverAddress, serverPort, authToken);
+        connectRef.current(serverAddress, serverPort, authToken);
         return;
       }
 
@@ -431,7 +397,7 @@ export const usePhotoSync = () => {
         try {
           const { address, port, token } = JSON.parse(saved);
           addLog('info', `Found localStorage credentials for ${address}:${port}`);
-          connect(address, port, token);
+          connectRef.current(address, port, token);
         } catch (error) {
           addLog('error', `Invalid saved connection data: ${error.message}`);
           localStorage.removeItem('photosync_server');
@@ -444,44 +410,23 @@ export const usePhotoSync = () => {
     attemptAutoConnect();
 
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmount');
+      if (socketRef.current) {
+        socketRef.current.disconnect();
       }
       // Cleanup blob URLs on unmount
       setPhotos(prevPhotos => {
         prevPhotos.forEach(photo => {
-          if (photo.url && photo.url.startsWith('blob:')) {
+          if (photo.url?.startsWith('blob:')) {
             URL.revokeObjectURL(photo.url);
           }
-          if (photo.thumbnail && photo.thumbnail.startsWith('blob:') && photo.thumbnail !== photo.url) {
+          if (photo.thumbnail?.startsWith('blob:') && photo.thumbnail !== photo.url) {
             URL.revokeObjectURL(photo.thumbnail);
           }
         });
         return [];
       });
     };
-  }, [connect, addLog]);
-
-  // Heartbeat
-  useEffect(() => {
-    if (connectionState !== CONNECTION_STATES.CONNECTED) return;
-
-    const interval = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        const ping = encode({
-          type: 'PING',
-          requestId: Date.now(),
-          timestamp: Date.now()
-        });
-        wsRef.current.send(ping);
-      }
-    }, 30000); // Every 30 seconds
-
-    return () => clearInterval(interval);
-  }, [connectionState]);
+  }, [addLog]);
 
   const clearLogs = useCallback(() => {
     setDebugLogs([]);

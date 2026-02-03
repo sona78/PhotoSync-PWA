@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PhotoSync WebRTC Test Connection</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #000;
+      color: #00ff00;
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    h1 {
+      border-bottom: 2px solid #00ff00;
+      padding-bottom: 10px;
+    }
+    .input-group {
+      margin: 20px 0;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      font-family: 'Courier New', monospace;
+      background: #1a1a1a;
+      color: #00ff00;
+      border: 2px solid #00ff00;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      background: #00ff00;
+      color: #000;
+      border: none;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover {
+      background: #00cc00;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    .result {
+      margin-top: 30px;
+      padding: 20px;
+      background: #1a1a1a;
+      border: 2px solid #00ff00;
+    }
+    .success {
+      color: #00ff00;
+    }
+    .error {
+      color: #ff0000;
+    }
+    pre {
+      background: #0a0a0a;
+      padding: 15px;
+      overflow-x: auto;
+      border: 1px solid #00ff00;
+      font-size: 12px;
+    }
+    .instructions {
+      background: #1a1a2a;
+      border: 2px solid #ffff00;
+      padding: 15px;
+      margin: 20px 0;
+      color: #ffff00;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔗 PhotoSync WebRTC Test Helper</h1>
+
+  <div class="instructions">
+    <strong>📋 Instructions:</strong><br><br>
+    1. Start signaling server: <code>cd PhotoSync-Signaling && npm start</code><br>
+    2. Start desktop app: <code>cd PhotoSync-Electron && npm run start:webrtc</code><br>
+    3. Copy the Room ID from desktop terminal<br>
+    4. Paste it below and click "Generate Connection Link"<br>
+    5. Open the link in a new tab (your PWA should be running on localhost:3000)
+  </div>
+
+  <div class="input-group">
+    <label>Signaling Server URL:</label>
+    <input type="text" id="signalingServer" value="ws://localhost:3002">
+  </div>
+
+  <div class="input-group">
+    <label>Room ID (from desktop logs):</label>
+    <input type="text" id="roomId" placeholder="Example: a1b2c3d4e5f6g7h8">
+  </div>
+
+  <button onclick="generateLink()">📝 Generate Connection Link</button>
+
+  <div id="result" class="result" style="display: none;"></div>
+
+  <script>
+    function generateLink() {
+      const signalingServer = document.getElementById('signalingServer').value.trim();
+      const roomId = document.getElementById('roomId').value.trim();
+
+      if (!signalingServer) {
+        alert('❌ Please enter signaling server URL');
+        return;
+      }
+
+      if (!roomId) {
+        alert('❌ Please enter Room ID from desktop logs!');
+        return;
+      }
+
+      const connectionData = {
+        type: 'webrtc',
+        signalingServer,
+        roomId,
+        version: '1.0'
+      };
+
+      // Encode as base64 for URL
+      const encoded = btoa(JSON.stringify(connectionData));
+      const pwaUrl = `http://localhost:3000?webrtc=${encoded}`;
+
+      const resultDiv = document.getElementById('result');
+      resultDiv.style.display = 'block';
+      resultDiv.innerHTML = `
+        <h3 class="success">✅ Connection Link Generated!</h3>
+
+        <p><strong>Connection Data:</strong></p>
+        <pre>${JSON.stringify(connectionData, null, 2)}</pre>
+
+        <p><strong>Base64 Encoded:</strong></p>
+        <pre>${encoded}</pre>
+
+        <p><strong>PWA Link (click to open):</strong></p>
+        <a href="${pwaUrl}" target="_blank" style="color: #00ff00; word-break: break-all;">
+          ${pwaUrl}
+        </a>
+
+        <button onclick="copyToClipboard('${encoded}')" style="margin-top: 15px;">
+          📋 Copy Encoded Data
+        </button>
+
+        <button onclick="window.open('${pwaUrl}', '_blank')" style="margin-top: 10px;">
+          🚀 Open PWA in New Tab
+        </button>
+
+        <div style="margin-top: 20px; padding: 15px; background: #2a2a1a; border: 1px solid #ffff00; color: #ffff00;">
+          <strong>⚠️ Note:</strong><br>
+          Make sure your PWA is running at http://localhost:3000<br>
+          The PWA needs to be updated to read the <code>?webrtc=</code> parameter.
+        </div>
+      `;
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('✅ Copied to clipboard!');
+      }).catch(err => {
+        alert('❌ Failed to copy: ' + err);
+      });
+    }
+
+    // Check if we're on the PWA and have connection data
+    const urlParams = new URLSearchParams(window.location.search);
+    const webrtcData = urlParams.get('webrtc');
+
+    if (webrtcData) {
+      try {
+        const connectionData = JSON.parse(atob(webrtcData));
+        document.body.innerHTML = `
+          <h1>🔗 Auto-Connect Mode</h1>
+          <div class="result">
+            <h3 class="success">✅ Connection Data Detected!</h3>
+            <p><strong>Signaling Server:</strong> ${connectionData.signalingServer}</p>
+            <p><strong>Room ID:</strong> ${connectionData.roomId}</p>
+            <pre>${JSON.stringify(connectionData, null, 2)}</pre>
+            <p style="margin-top: 20px; color: #ffff00;">
+              <strong>📝 Instructions:</strong><br>
+              Open your PWA's browser console and run:
+            </p>
+            <pre style="color: #00ff00;">
+// Paste this in your PWA console (F12)
+const qrData = ${JSON.stringify(connectionData, null, 2)};
+
+// Trigger connection
+// You'll need to call your connection handler
+console.log('Connection data ready:', qrData);
+console.log('Use this data in your QR scanner component');
+            </pre>
+          </div>
+        `;
+      } catch (e) {
+        console.error('Failed to parse connection data:', e);
+      }
+    }
+  </script>
+</body>
+</html>
