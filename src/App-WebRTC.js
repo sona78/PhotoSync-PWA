@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import './App.css';
 import Gallery from './components/Gallery';
 import Auth from './components/Auth';
@@ -6,7 +6,6 @@ import QRScanner from './components/QRScanner';
 import DebugLog from './components/DebugLog';
 import ConnectionDiagnostics from './components/ConnectionDiagnostics';
 import { supabase } from './lib/supabase';
-import { usePhotoSync } from './hooks/usePhotoSync';
 import { usePhotoSyncWebRTC } from './hooks/usePhotoSyncWebRTC';
 import {
   saveWebRTCConnection,
@@ -57,7 +56,7 @@ function App() {
 
   // Legacy Socket.IO connection (disabled - use App.js if you need legacy mode)
   // const legacySync = usePhotoSync();
-  const legacySync = {
+  const legacySync = useMemo(() => ({
     connectionState: 'disconnected',
     photos: [],
     disconnect: () => {},
@@ -68,7 +67,7 @@ function App() {
     photoData: {},
     requestPhoto: () => {},
     connect: () => console.warn('[App] Legacy mode disabled in WebRTC app')
-  };
+  }), []);
 
   // Debug: Log what webrtcSync contains IMMEDIATELY
   console.log('[App] webrtcSync IMMEDIATE check:', {
