@@ -8,6 +8,12 @@ import ConnectionDiagnostics from './components/ConnectionDiagnostics';
 import { supabase } from './lib/supabase';
 import { usePhotoSync } from './hooks/usePhotoSync';
 import { usePhotoSyncWebRTC } from './hooks/usePhotoSyncWebRTC';
+import {
+  saveWebRTCConnection,
+  loadWebRTCConnection,
+  deleteWebRTCConnection,
+  updateLastConnected
+} from './lib/webrtcConnection';
 
 // Signaling server configuration
 // For local testing: ws://localhost:3002
@@ -21,18 +27,48 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showDebugLogs, setShowDebugLogs] = useState(false);
-  const [connectionMode, setConnectionMode] = useState(null); // 'legacy' or 'webrtc'
+  const [connectionMode, setConnectionMode] = useState('webrtc'); // Always use WebRTC in this app
 
   // Debug: Log connectionMode changes
   useEffect(() => {
     console.log('[App] connectionMode changed to:', connectionMode);
   }, [connectionMode]);
 
-  // Legacy Socket.IO connection
-  const legacySync = usePhotoSync();
+  // Check for active service workers on mount
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        if (registrations.length > 0) {
+          console.warn('[App] ⚠️ WARNING: Active service workers detected!');
+          console.warn('[App] This may cause authentication issues.');
+          console.warn('[App] Please visit /cleanup.html to remove them.');
+          registrations.forEach((reg) => {
+            console.warn('[App] - Active SW:', reg.scope);
+          });
+        } else {
+          console.log('[App] ✓ No active service workers (good!)');
+        }
+      });
+    }
+  }, []);
 
-  // WebRTC P2P connection
+  // WebRTC P2P connection (primary mode for this app)
   const webrtcSync = usePhotoSyncWebRTC();
+
+  // Legacy Socket.IO connection (disabled - use App.js if you need legacy mode)
+  // const legacySync = usePhotoSync();
+  const legacySync = {
+    connectionState: 'disconnected',
+    photos: [],
+    disconnect: () => {},
+    requestManifest: () => {},
+    error: null,
+    syncProgress: { current: 0, total: 0 },
+    debugLogs: [],
+    photoData: {},
+    requestPhoto: () => {},
+    connect: () => console.warn('[App] Legacy mode disabled in WebRTC app')
+  };
 
   // Debug: Log what webrtcSync contains IMMEDIATELY
   console.log('[App] webrtcSync IMMEDIATE check:', {
@@ -67,6 +103,7 @@ function App() {
     debugLogs,
     photoData,
     requestPhoto,
+    connectionInfo,
   } = activeSync;
 
   // Debug: Log props being passed to Gallery
@@ -119,28 +156,79 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Auto-reconnect to saved connection
+  useEffect(() => {
+    const attemptAutoReconnect = async () => {
+      // Only auto-reconnect if not already connected
+      if (connectionState !== 'disconnected' || loading) {
+        return;
+      }
+
+      console.log('[App] Checking for saved WebRTC connection...');
+      const result = await loadWebRTCConnection();
+
+      if (result.success && result.data) {
+        const { signalingServer, roomId, deviceName } = result.data;
+        console.log('[App] Found saved connection:', { signalingServer, roomId, deviceName });
+        console.log('[App] Auto-reconnecting...');
+
+        // Connect using saved credentials
+        webrtcSync.connect(signalingServer, roomId);
+      } else {
+        console.log('[App] No saved connection found');
+      }
+    };
+
+    // Run after loading is complete
+    if (!loading) {
+      attemptAutoReconnect();
+    }
+  }, [loading, connectionState, webrtcSync]);
+
+  // Update last connected timestamp when connection is established
+  useEffect(() => {
+    if (connectionState === 'connected') {
+      updateLastConnected().then((result) => {
+        if (result.success) {
+          console.log('[App] Updated last connected timestamp');
+        }
+      });
+    }
+  }, [connectionState]);
+
   const handleSignOut = async () => {
+    // Clear saved connection on sign out
+    await deleteWebRTCConnection();
     const { error } = await supabase.auth.signOut();
     if (!error) {
       setUser(null);
     }
   };
 
-  const handleQRScanSuccess = (payload) => {
+  const handleQRScanSuccess = async (payload) => {
     console.log('QR scanned successfully:', payload);
     setShowQRScanner(false);
 
-    // Detect connection type
+    // WebRTC mode only
     if (payload.type === 'webrtc') {
-      // WebRTC connection
-      console.log('Using WebRTC mode');
-      setConnectionMode('webrtc');
+      console.log('[App] Connecting via WebRTC:', payload.signalingServer, payload.roomId);
+
+      // Save connection info for auto-reconnect
+      const saveResult = await saveWebRTCConnection({
+        signalingServer: payload.signalingServer,
+        roomId: payload.roomId,
+        deviceName: payload.deviceName || 'Desktop'
+      });
+
+      if (saveResult.success) {
+        console.log('[App] Connection info saved for auto-reconnect');
+      }
+
+      // Connect
       webrtcSync.connect(payload.signalingServer, payload.roomId);
     } else {
-      // Legacy direct connection
-      console.log('Using legacy mode');
-      setConnectionMode('legacy');
-      legacySync.connect(payload.s, payload.p, payload.t);
+      console.error('[App] Legacy connection mode not supported in WebRTC app');
+      alert('This QR code is for legacy mode. Please use the WebRTC QR code from your desktop.');
     }
   };
 
@@ -148,8 +236,13 @@ function App() {
     console.error('QR scan error:', error);
   };
 
-  const handleDisconnect = () => {
-    if (window.confirm('Disconnect from server? You will need to scan the QR code again to reconnect.')) {
+  const handleDisconnect = async () => {
+    if (window.confirm('Disconnect and forget this device?\n\nNote: Your desktop uses a persistent QR code, so you can re-scan the same QR code later to reconnect.')) {
+      // Delete saved connection
+      await deleteWebRTCConnection();
+      console.log('[App] Saved connection cleared');
+
+      // Disconnect
       disconnect();
       setConnectionMode(null);
     }
@@ -259,6 +352,30 @@ function App() {
                   NOT CONNECTED TO SERVER<br />
                   SCAN QR CODE FROM ELECTRON APP TO PAIR
                 </p>
+                <div style={{
+                  padding: '12px',
+                  background: '#f0fff0',
+                  border: '2px solid #28a745',
+                  borderRadius: '4px',
+                  marginBottom: '15px'
+                }}>
+                  <p className="info-text" style={{
+                    fontSize: '13px',
+                    color: '#28a745',
+                    marginBottom: '6px',
+                    fontWeight: 'bold'
+                  }}>
+                    💡 Persistent QR Codes
+                  </p>
+                  <p className="info-text" style={{
+                    fontSize: '12px',
+                    color: '#666',
+                    margin: 0,
+                    lineHeight: '1.5'
+                  }}>
+                    Your desktop's QR code stays the same every time. Scan it once and this app will remember it for easy reconnection!
+                  </p>
+                </div>
                 <button
                   onClick={() => setShowQRScanner(true)}
                   style={{
@@ -378,8 +495,40 @@ function App() {
                       MODE: {connectionMode === 'webrtc' ? 'WebRTC P2P' : 'Direct Connection'}
                     </p>
                   )}
+                  {connectionInfo && connectionInfo.roomId && (
+                    <div style={{
+                      marginTop: '12px',
+                      padding: '12px',
+                      background: '#f0fff0',
+                      border: '2px solid #28a745',
+                      borderRadius: '4px'
+                    }}>
+                      <p className="info-text" style={{
+                        fontSize: '13px',
+                        color: '#28a745',
+                        marginBottom: '8px',
+                        fontWeight: 'bold'
+                      }}>
+                        🔒 PERSISTENT CONNECTION
+                      </p>
+                      <p className="info-text" style={{
+                        fontSize: '12px',
+                        marginBottom: '6px',
+                        wordBreak: 'break-all'
+                      }}>
+                        Room ID: {connectionInfo.roomId}
+                      </p>
+                      <p className="info-text" style={{
+                        fontSize: '11px',
+                        color: '#666',
+                        margin: 0
+                      }}>
+                        This connection will remain valid and you can reconnect anytime.
+                      </p>
+                    </div>
+                  )}
                   {connectionState === 'connected' && (
-                    <p className="info-text" style={{ fontSize: '16px' }}>
+                    <p className="info-text" style={{ fontSize: '16px', marginTop: '12px' }}>
                       PHOTOS SYNCED: {photoCount}
                     </p>
                   )}

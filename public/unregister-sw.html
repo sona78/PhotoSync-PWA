@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PhotoSync - Unregister Service Worker</title>
+  <style>
+    body {
+      font-family: 'VT323', monospace;
+      background: #000;
+      color: #00ff00;
+      padding: 40px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 32px;
+      margin-bottom: 20px;
+    }
+    button {
+      font-family: 'VT323', monospace;
+      font-size: 20px;
+      padding: 15px 30px;
+      background: #00ff00;
+      color: #000;
+      border: 3px solid #00ff00;
+      cursor: pointer;
+      margin: 10px 10px 10px 0;
+    }
+    button:hover {
+      background: #000;
+      color: #00ff00;
+    }
+    #status {
+      margin-top: 30px;
+      padding: 20px;
+      border: 2px solid #00ff00;
+      min-height: 100px;
+    }
+    .success {
+      color: #00ff00;
+    }
+    .error {
+      color: #ff0000;
+    }
+    .info {
+      color: #ffff00;
+    }
+  </style>
+</head>
+<body>
+  <h1>PHOTOSYNC - SERVICE WORKER MANAGER</h1>
+
+  <p>Use this page to manually manage the service worker if you're experiencing issues.</p>
+
+  <button onclick="unregisterServiceWorker()">UNREGISTER SERVICE WORKER</button>
+  <button onclick="clearAllCaches()">CLEAR ALL CACHES</button>
+  <button onclick="checkServiceWorker()">CHECK SERVICE WORKER STATUS</button>
+  <button onclick="goToApp()">GO TO APP</button>
+
+  <div id="status">
+    <p>Click a button to perform an action.</p>
+  </div>
+
+  <script>
+    function log(message, type = 'info') {
+      const status = document.getElementById('status');
+      const p = document.createElement('p');
+      p.className = type;
+      p.textContent = message;
+      status.appendChild(p);
+    }
+
+    function clearStatus() {
+      document.getElementById('status').innerHTML = '';
+    }
+
+    async function unregisterServiceWorker() {
+      clearStatus();
+      log('Unregistering service worker...', 'info');
+
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+
+          if (registrations.length === 0) {
+            log('No service workers found.', 'info');
+            return;
+          }
+
+          for (const registration of registrations) {
+            await registration.unregister();
+            log(`✓ Unregistered service worker: ${registration.scope}`, 'success');
+          }
+
+          log('All service workers unregistered successfully!', 'success');
+          log('Refresh the app to start fresh.', 'info');
+        } catch (error) {
+          log(`✗ Error: ${error.message}`, 'error');
+        }
+      } else {
+        log('Service workers not supported in this browser.', 'error');
+      }
+    }
+
+    async function clearAllCaches() {
+      clearStatus();
+      log('Clearing all caches...', 'info');
+
+      if ('caches' in window) {
+        try {
+          const cacheNames = await caches.keys();
+
+          if (cacheNames.length === 0) {
+            log('No caches found.', 'info');
+            return;
+          }
+
+          for (const cacheName of cacheNames) {
+            await caches.delete(cacheName);
+            log(`✓ Deleted cache: ${cacheName}`, 'success');
+          }
+
+          log('All caches cleared successfully!', 'success');
+        } catch (error) {
+          log(`✗ Error: ${error.message}`, 'error');
+        }
+      } else {
+        log('Cache API not supported in this browser.', 'error');
+      }
+    }
+
+    async function checkServiceWorker() {
+      clearStatus();
+      log('Checking service worker status...', 'info');
+
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+
+          if (registrations.length === 0) {
+            log('No service workers registered.', 'info');
+          } else {
+            log(`Found ${registrations.length} service worker(s):`, 'info');
+
+            for (const registration of registrations) {
+              log(`\nScope: ${registration.scope}`, 'info');
+
+              if (registration.active) {
+                log(`  Active: ${registration.active.scriptURL}`, 'success');
+              }
+              if (registration.waiting) {
+                log(`  Waiting: ${registration.waiting.scriptURL}`, 'info');
+              }
+              if (registration.installing) {
+                log(`  Installing: ${registration.installing.scriptURL}`, 'info');
+              }
+            }
+          }
+
+          // Check caches
+          const cacheNames = await caches.keys();
+          if (cacheNames.length > 0) {
+            log(`\nCaches (${cacheNames.length}):`, 'info');
+            cacheNames.forEach(name => log(`  - ${name}`, 'info'));
+          } else {
+            log('\nNo caches found.', 'info');
+          }
+        } catch (error) {
+          log(`✗ Error: ${error.message}`, 'error');
+        }
+      } else {
+        log('Service workers not supported in this browser.', 'error');
+      }
+    }
+
+    function goToApp() {
+      window.location.href = '/';
+    }
+
+    // Auto-check on load
+    window.addEventListener('load', () => {
+      checkServiceWorker();
+    });
+  </script>
+</body>
+</html>

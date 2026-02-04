@@ -12,22 +12,57 @@ const Auth = () => {
     setLoading(true);
     setMessage('');
 
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: window.location.origin,
-        },
-      });
+    console.log('[Auth] Starting passwordless login for:', email);
+    console.log('[Auth] Window origin:', window.location.origin);
 
-      if (error) {
-        setMessage(`ERROR: ${error.message}`);
+    // Check if running on unusual port
+    if (window.location.port === '3002') {
+      console.warn('[Auth] ⚠️ WARNING: Running on port 3002 (signaling server port)');
+      console.warn('[Auth] The PWA should run on port 3000 or 3001');
+      console.warn('[Auth] This may cause authentication issues');
+    }
+
+    try {
+      console.log('[Auth] Calling supabase.auth.signInWithOtp...');
+      console.log('[Auth] Email redirect URL:', window.location.origin);
+
+      const result = await Promise.race([
+        supabase.auth.signInWithOtp({
+          email,
+          options: {
+            emailRedirectTo: window.location.origin,
+          },
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Request timeout after 30 seconds')), 30000)
+        )
+      ]);
+
+      console.log('[Auth] Supabase response:', result);
+
+      if (result.error) {
+        console.error('[Auth] Supabase error:', result.error);
+        setMessage(`ERROR: ${result.error.message}`);
       } else {
+        console.log('[Auth] Success! Email sent.');
         setMessage('CHECK YOUR EMAIL FOR THE LOGIN LINK. CLICK THE LINK TO SIGN IN.');
       }
     } catch (error) {
-      setMessage(`ERROR: ${error.message}`);
+      console.error('[Auth] Exception caught:', error);
+
+      let errorMessage = error.message;
+
+      if (error.message.includes('timeout')) {
+        errorMessage = 'Connection timeout. Possible issues:\n' +
+          '1. Check your internet connection\n' +
+          '2. Visit /test-supabase.html to diagnose\n' +
+          '3. Check Supabase dashboard: Email auth enabled?\n' +
+          '4. Check browser console for CORS errors';
+      }
+
+      setMessage(`ERROR: ${errorMessage}`);
     } finally {
+      console.log('[Auth] Finished (loading = false)');
       setLoading(false);
     }
   };

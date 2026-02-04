@@ -33,6 +33,9 @@ export const usePhotoSyncWebRTC = () => {
   const peerRef = useRef(null);
   const photoBufferRef = useRef(null); // Buffer for receiving photo chunks
   const currentPhotoRef = useRef(null); // Current photo being received
+  const heartbeatIntervalRef = useRef(null); // Signaling keep-alive timer
+  const peerHeartbeatIntervalRef = useRef(null); // P2P keep-alive timer
+  const photoDataRef = useRef({}); // Track photoData for cleanup without dependency
 
   // Debug logs
   const [debugLogs, setDebugLogs] = useState([]);
@@ -44,6 +47,11 @@ export const usePhotoSyncWebRTC = () => {
     setDebugLogs(prev => [...prev.slice(-maxLogs + 1), log]);
     console.log(`[WebRTC ${level.toUpperCase()}]`, message);
   }, []);
+
+  // Keep photoDataRef in sync with photoData state
+  useEffect(() => {
+    photoDataRef.current = photoData;
+  }, [photoData]);
 
   /**
    * Connect to desktop via WebRTC
@@ -70,6 +78,8 @@ export const usePhotoSyncWebRTC = () => {
         addLog('Connected to signaling server');
         // Join room
         socket.emit('join-room', { roomId });
+        // Start heartbeat to keep connection alive
+        startHeartbeat();
       });
 
       socket.on('room-joined', ({ roomId: joinedRoomId, desktopId }) => {
@@ -124,8 +134,20 @@ export const usePhotoSyncWebRTC = () => {
 
       socket.on('disconnect', () => {
         addLog('Disconnected from signaling server', 'warn');
+        stopHeartbeat();
         if (connectionState !== 'disconnected') {
           setConnectionState('connecting'); // Will auto-reconnect
+        }
+      });
+
+      // Listen for pong responses
+      socket.on('pong', ({ timestamp }) => {
+        const latency = Date.now() - timestamp;
+        console.log(`[PWA] Received heartbeat pong - Latency: ${latency}ms`);
+        if (latency > 5000) {
+          addLog(`High signaling latency: ${latency}ms`, 'warn');
+        } else if (latency > 2000) {
+          addLog(`Moderate signaling latency: ${latency}ms`, 'info');
         }
       });
 
@@ -162,6 +184,9 @@ export const usePhotoSyncWebRTC = () => {
           addLog('P2P connection established! 🎉');
           setConnectionState('connected');
           setError(null);
+
+          // Start P2P heartbeat to keep data channel alive
+          startPeerHeartbeat();
 
           // Request manifest
           requestManifest();
@@ -263,8 +288,25 @@ export const usePhotoSyncWebRTC = () => {
           finishPhotoDownload();
           break;
 
+        case 'ping':
+          // Respond to P2P ping from desktop
+          const peer = peerRef.current;
+          if (peer && peer.connected && !peer.destroyed) {
+            try {
+              peer.send(JSON.stringify({ type: 'pong', timestamp: message.timestamp }));
+            } catch (err) {
+              console.error('[PWA] Error sending P2P pong:', err.message);
+            }
+          }
+          break;
+
         case 'pong':
-          // Ping response
+          // P2P pong received - calculate latency
+          const latency = Date.now() - message.timestamp;
+          console.log(`[PWA] Received P2P pong - Latency: ${latency}ms`);
+          if (latency > 1000) {
+            addLog(`High P2P latency: ${latency}ms`, 'warn');
+          }
           break;
 
         case 'error':
@@ -287,8 +329,20 @@ export const usePhotoSyncWebRTC = () => {
    * Send message to peer
    */
   const sendToPeer = useCallback((message) => {
-    if (peerRef.current && !peerRef.current.destroyed) {
-      peerRef.current.send(JSON.stringify(message));
+    const peer = peerRef.current;
+    if (peer && peer.connected && !peer.destroyed) {
+      try {
+        peer.send(JSON.stringify(message));
+      } catch (err) {
+        console.error('[PWA] Error sending message to peer:', err.message);
+        // Don't throw - let the caller handle the lack of response
+      }
+    } else {
+      console.warn('[PWA] Cannot send message - peer not ready:', {
+        exists: !!peer,
+        connected: peer?.connected,
+        destroyed: peer?.destroyed
+      });
     }
   }, []);
 
@@ -322,9 +376,101 @@ export const usePhotoSyncWebRTC = () => {
   }, [requestPhoto, addLog]);
 
   /**
+   * Stop heartbeat timer
+   */
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Start heartbeat to keep signaling connection alive
+   */
+  const startHeartbeat = useCallback(() => {
+    // Clear any existing heartbeat
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    addLog('Starting heartbeat (30s interval)');
+
+    // Send ping every 30 seconds
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (signalingSocketRef.current?.connected) {
+        console.log('[PWA] Sending heartbeat ping to signaling server');
+        signalingSocketRef.current.emit('ping');
+      } else {
+        addLog('Heartbeat skipped - not connected', 'warn');
+      }
+    }, 30000);
+
+    // Send first ping immediately
+    if (signalingSocketRef.current?.connected) {
+      console.log('[PWA] Sending initial heartbeat ping');
+      signalingSocketRef.current.emit('ping');
+    }
+  }, [addLog]);
+
+  /**
+   * Start P2P data channel heartbeat
+   */
+  const startPeerHeartbeat = useCallback(() => {
+    // Clear any existing P2P heartbeat
+    if (peerHeartbeatIntervalRef.current) {
+      clearInterval(peerHeartbeatIntervalRef.current);
+    }
+
+    addLog('Starting P2P heartbeat (20s interval)');
+
+    // Send ping every 20 seconds to keep data channel alive
+    peerHeartbeatIntervalRef.current = setInterval(() => {
+      const peer = peerRef.current;
+      if (peer && peer.connected && !peer.destroyed) {
+        console.log('[PWA] Sending P2P heartbeat ping');
+        try {
+          peer.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+        } catch (err) {
+          console.error('[PWA] Error sending P2P ping:', err.message);
+          // Don't clear interval - peer might recover
+        }
+      }
+    }, 20000);
+
+    // Send first ping after a short delay to ensure peer is fully ready
+    setTimeout(() => {
+      const peer = peerRef.current;
+      if (peer && peer.connected && !peer.destroyed) {
+        console.log('[PWA] Sending initial P2P heartbeat ping');
+        try {
+          peer.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+        } catch (err) {
+          console.error('[PWA] Error sending initial P2P ping:', err.message);
+        }
+      }
+    }, 100); // Small delay to ensure connection is stable
+  }, [addLog]);
+
+  /**
+   * Stop P2P heartbeat
+   */
+  const stopPeerHeartbeat = useCallback(() => {
+    if (peerHeartbeatIntervalRef.current) {
+      clearInterval(peerHeartbeatIntervalRef.current);
+      peerHeartbeatIntervalRef.current = null;
+    }
+  }, []);
+
+  /**
    * Cleanup connections
    */
   const cleanup = useCallback(() => {
+    console.log('[PWA] Cleanup called - destroying connections');
+    stopHeartbeat();
+    stopPeerHeartbeat();
+
     if (peerRef.current) {
       peerRef.current.destroy();
       peerRef.current = null;
@@ -335,13 +481,14 @@ export const usePhotoSyncWebRTC = () => {
       signalingSocketRef.current = null;
     }
 
-    // Clean up blob URLs
-    Object.values(photoData).forEach(url => {
-      if (url.startsWith('blob:')) {
+    // Clean up blob URLs - use ref to get current photoData without dependency
+    const currentPhotoData = photoDataRef.current || {};
+    Object.values(currentPhotoData).forEach(url => {
+      if (typeof url === 'string' && url.startsWith('blob:')) {
         URL.revokeObjectURL(url);
       }
     });
-  }, [photoData]);
+  }, [stopHeartbeat, stopPeerHeartbeat]);
 
   /**
    * Disconnect

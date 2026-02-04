@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PhotoSync - Cleanup</title>
+  <style>
+    body {
+      font-family: 'VT323', monospace;
+      background: #000;
+      color: #00ff00;
+      padding: 40px;
+      max-width: 800px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    h1 {
+      font-size: 32px;
+      margin-bottom: 30px;
+    }
+    .status {
+      padding: 20px;
+      border: 2px solid #00ff00;
+      margin: 20px 0;
+      min-height: 150px;
+    }
+    .success {
+      color: #00ff00;
+    }
+    .error {
+      color: #ff0000;
+    }
+    button {
+      font-family: 'VT323', monospace;
+      font-size: 20px;
+      padding: 15px 30px;
+      background: #00ff00;
+      color: #000;
+      border: 3px solid #00ff00;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:hover {
+      background: #000;
+      color: #00ff00;
+    }
+  </style>
+</head>
+<body>
+  <h1>PHOTOSYNC - ONE-TIME CLEANUP</h1>
+  <p>This page will remove all service workers and caches.</p>
+  <p>Please wait...</p>
+
+  <div id="status" class="status">
+    <p>Running cleanup...</p>
+  </div>
+
+  <button id="continueBtn" style="display:none;" onclick="goToApp()">CONTINUE TO APP</button>
+
+  <script>
+    const statusDiv = document.getElementById('status');
+    const continueBtn = document.getElementById('continueBtn');
+
+    function log(message, isError = false) {
+      const p = document.createElement('p');
+      p.className = isError ? 'error' : 'success';
+      p.textContent = message;
+      statusDiv.appendChild(p);
+    }
+
+    function clearStatus() {
+      statusDiv.innerHTML = '';
+    }
+
+    async function aggressiveCleanup() {
+      clearStatus();
+      log('Starting aggressive cleanup...', false);
+
+      let success = true;
+
+      // 1. Unregister all service workers
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+
+          if (registrations.length > 0) {
+            log(`Found ${registrations.length} service worker(s)`, false);
+
+            for (const registration of registrations) {
+              await registration.unregister();
+              log('✓ Unregistered: ' + registration.scope, false);
+            }
+          } else {
+            log('No service workers found', false);
+          }
+        } catch (error) {
+          log('✗ Error unregistering service workers: ' + error.message, true);
+          success = false;
+        }
+      }
+
+      // 2. Clear all caches
+      if ('caches' in window) {
+        try {
+          const cacheNames = await caches.keys();
+
+          if (cacheNames.length > 0) {
+            log(`Found ${cacheNames.length} cache(s)`, false);
+
+            for (const cacheName of cacheNames) {
+              await caches.delete(cacheName);
+              log('✓ Deleted cache: ' + cacheName, false);
+            }
+          } else {
+            log('No caches found', false);
+          }
+        } catch (error) {
+          log('✗ Error clearing caches: ' + error.message, true);
+          success = false;
+        }
+      }
+
+      // 3. Clear localStorage flag if it exists
+      try {
+        localStorage.removeItem('photosync-sw-cleaned');
+        log('✓ Cleared localStorage flag', false);
+      } catch (error) {
+        log('✗ Error clearing localStorage: ' + error.message, true);
+      }
+
+      // 4. Summary
+      log('', false);
+      if (success) {
+        log('✓ CLEANUP COMPLETE!', false);
+        log('You can now continue to the app.', false);
+      } else {
+        log('⚠ Cleanup completed with errors', true);
+        log('The app should still work. If not, try clearing browser data manually.', false);
+      }
+
+      // Show continue button
+      continueBtn.style.display = 'inline-block';
+
+      // Set flag to prevent future cleanups
+      try {
+        localStorage.setItem('photosync-sw-cleaned', 'true');
+      } catch (e) {
+        console.error('Could not set cleanup flag:', e);
+      }
+    }
+
+    function goToApp() {
+      window.location.href = '/';
+    }
+
+    // Run cleanup immediately on load
+    window.addEventListener('load', () => {
+      aggressiveCleanup();
+    });
+  </script>
+</body>
+</html>

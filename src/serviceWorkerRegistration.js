@@ -86,12 +86,49 @@ function checkValidServiceWorker(swUrl, config) {
 
 export function unregister() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.ready
-      .then((registration) => {
-        registration.unregister();
+    // Get all registrations and unregister them
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => {
+        if (registrations.length === 0) {
+          console.log('[SW] No service workers to unregister');
+          return;
+        }
+
+        console.log(`[SW] Unregistering ${registrations.length} service worker(s)...`);
+        registrations.forEach((registration) => {
+          registration.unregister()
+            .then(() => {
+              console.log('[SW] Service worker unregistered successfully');
+            })
+            .catch((error) => {
+              console.error('[SW] Error unregistering:', error.message);
+            });
+        });
       })
       .catch((error) => {
-        console.error(error.message);
+        console.error('[SW] Error getting registrations:', error.message);
       });
+
+    // Also clear all caches
+    if ('caches' in window) {
+      caches.keys().then((cacheNames) => {
+        if (cacheNames.length === 0) {
+          console.log('[SW] No caches to clear');
+          return Promise.resolve();
+        }
+
+        console.log(`[SW] Deleting ${cacheNames.length} cache(s)...`);
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            console.log('[SW] Deleting cache:', cacheName);
+            return caches.delete(cacheName);
+          })
+        );
+      }).then(() => {
+        console.log('[SW] All caches cleared');
+      }).catch((error) => {
+        console.error('[SW] Error clearing caches:', error.message);
+      });
+    }
   }
 }

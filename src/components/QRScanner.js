@@ -276,8 +276,48 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
         <div className="manual-entry">
           <h3>MANUAL WEBRTC CONNECTION</h3>
           <p className="manual-instructions">
-            Enter the WebRTC connection details from your Electron app terminal
+            Enter the WebRTC connection details shown in your Electron app terminal at startup
           </p>
+          <div style={{
+            padding: '10px',
+            background: '#f5f5f5',
+            border: '1px solid #ddd',
+            borderRadius: '4px',
+            marginBottom: '15px',
+            fontFamily: 'monospace',
+            fontSize: '11px'
+          }}>
+            <div style={{ marginBottom: '4px' }}>Look for these lines in the terminal:</div>
+            <div style={{ color: '#0066cc' }}>[WebRTC] Persistent Room ID: abc123...</div>
+            <div style={{ color: '#0066cc' }}>[WebRTC] Signaling Server: wss://...</div>
+          </div>
+
+          <div style={{
+            padding: '12px',
+            background: '#f0fff0',
+            border: '2px solid #28a745',
+            borderRadius: '4px',
+            marginBottom: '15px'
+          }}>
+            <p style={{
+              fontSize: '13px',
+              color: '#28a745',
+              marginBottom: '6px',
+              fontWeight: 'bold',
+              margin: '0 0 6px 0'
+            }}>
+              🔒 Persistent Connection
+            </p>
+            <p style={{
+              fontSize: '12px',
+              color: '#666',
+              margin: 0,
+              lineHeight: '1.5'
+            }}>
+              Your desktop's Room ID stays the same. Enter it once and this app will remember it for automatic reconnection!
+            </p>
+          </div>
+
           <form onSubmit={handleManualSubmit}>
             <div className="form-group">
               <label>SIGNALING SERVER URL</label>
@@ -292,16 +332,16 @@ const QRScanner = ({ onScanSuccess, onScanError }) => {
               <small>Example: wss://photosync-signaling.onrender.com</small>
             </div>
             <div className="form-group">
-              <label>ROOM ID</label>
+              <label>ROOM ID (PERSISTENT)</label>
               <input
                 type="text"
                 value={manualToken}
                 onChange={(e) => setManualToken(e.target.value)}
-                placeholder="abc123..."
+                placeholder="14ada4b8fae7e2c8"
                 className="manual-input"
                 required
               />
-              <small>Room ID shown in desktop terminal</small>
+              <small>Room ID from desktop app - this ID doesn't change on restart</small>
             </div>
             <div className="button-group">
               <button type="submit" className="scan-button">

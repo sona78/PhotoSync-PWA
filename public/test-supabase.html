@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Supabase Connection Test</title>
+  <style>
+    body {
+      font-family: 'VT323', monospace;
+      background: #000;
+      color: #00ff00;
+      padding: 40px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 32px; margin-bottom: 20px; }
+    button {
+      font-family: 'VT323', monospace;
+      font-size: 20px;
+      padding: 15px 30px;
+      background: #00ff00;
+      color: #000;
+      border: 3px solid #00ff00;
+      cursor: pointer;
+      margin: 10px 10px 10px 0;
+    }
+    button:hover { background: #000; color: #00ff00; }
+    #results {
+      margin-top: 30px;
+      padding: 20px;
+      border: 2px solid #00ff00;
+      min-height: 200px;
+      white-space: pre-wrap;
+      font-family: monospace;
+    }
+    .success { color: #00ff00; }
+    .error { color: #ff0000; }
+    .warning { color: #ffff00; }
+    .info { color: #00aaff; }
+  </style>
+</head>
+<body>
+  <h1>SUPABASE CONNECTION TEST</h1>
+  <p>This page will test your Supabase connection and configuration.</p>
+
+  <button onclick="testConnection()">RUN CONNECTION TEST</button>
+  <button onclick="testAuth()">TEST AUTH ENDPOINT</button>
+  <button onclick="clearResults()">CLEAR</button>
+
+  <div id="results">Click "RUN CONNECTION TEST" to begin...</div>
+
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+    const resultsDiv = document.getElementById('results');
+
+    function log(message, type = 'info') {
+      const span = document.createElement('span');
+      span.className = type;
+      span.textContent = message + '\n';
+      resultsDiv.appendChild(span);
+    }
+
+    function clearResults() {
+      resultsDiv.innerHTML = 'Ready for new test...\n';
+    }
+    window.clearResults = clearResults;
+
+    async function testConnection() {
+      clearResults();
+      log('=== SUPABASE CONNECTION TEST ===', 'info');
+      log('', 'info');
+
+      // Read from localStorage or prompt
+      let supabaseUrl = localStorage.getItem('test_supabase_url');
+      let supabaseKey = localStorage.getItem('test_supabase_key');
+
+      if (!supabaseUrl) {
+        supabaseUrl = prompt('Enter your Supabase URL:\n(from .env: REACT_APP_SUPABASE_URL)');
+        if (supabaseUrl) localStorage.setItem('test_supabase_url', supabaseUrl);
+      }
+
+      if (!supabaseKey) {
+        supabaseKey = prompt('Enter your Supabase Anon Key:\n(from .env: REACT_APP_SUPABASE_ANON_KEY)');
+        if (supabaseKey) localStorage.setItem('test_supabase_key', supabaseKey);
+      }
+
+      if (!supabaseUrl || !supabaseKey) {
+        log('✗ Test cancelled - missing credentials', 'error');
+        return;
+      }
+
+      log('1. Testing URL format...', 'info');
+      log('   URL: ' + supabaseUrl, 'info');
+      if (supabaseUrl.startsWith('https://') && supabaseUrl.includes('.supabase.co')) {
+        log('   ✓ URL format looks correct', 'success');
+      } else {
+        log('   ✗ URL format may be incorrect', 'warning');
+      }
+      log('', 'info');
+
+      log('2. Testing anon key format...', 'info');
+      log('   Key: ' + supabaseKey.substring(0, 30) + '...', 'info');
+      if (supabaseKey.startsWith('eyJ')) {
+        log('   ✓ Key format looks correct (JWT)', 'success');
+      } else {
+        log('   ✗ Key does NOT look like a valid JWT!', 'error');
+        log('   ✗ Valid keys start with "eyJ"', 'error');
+        return;
+      }
+      log('', 'info');
+
+      log('3. Testing network connectivity...', 'info');
+      try {
+        const response = await fetch(supabaseUrl + '/rest/v1/', {
+          method: 'GET',
+          headers: {
+            'apikey': supabaseKey
+          }
+        });
+        log('   Status: ' + response.status, 'info');
+        if (response.ok || response.status === 200) {
+          log('   ✓ Network connectivity OK', 'success');
+        } else {
+          log('   ✗ Got response but status is: ' + response.status, 'warning');
+        }
+      } catch (error) {
+        log('   ✗ Network error: ' + error.message, 'error');
+        return;
+      }
+      log('', 'info');
+
+      log('4. Creating Supabase client...', 'info');
+      try {
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        log('   ✓ Client created successfully', 'success');
+        window.testSupabase = supabase;
+      } catch (error) {
+        log('   ✗ Error creating client: ' + error.message, 'error');
+        return;
+      }
+      log('', 'info');
+
+      log('=== TEST COMPLETE ===', 'success');
+      log('If all checks passed, your Supabase config is correct.', 'info');
+      log('If auth still fails, check Supabase dashboard settings:', 'info');
+      log('  - Authentication > Providers > Email enabled?', 'info');
+      log('  - Authentication > URL Configuration > Site URL correct?', 'info');
+    }
+    window.testConnection = testConnection;
+
+    async function testAuth() {
+      clearResults();
+      log('=== TESTING AUTH ENDPOINT ===', 'info');
+      log('', 'info');
+
+      if (!window.testSupabase) {
+        log('✗ Please run "RUN CONNECTION TEST" first', 'error');
+        return;
+      }
+
+      const testEmail = prompt('Enter email to test with:');
+      if (!testEmail) {
+        log('✗ Test cancelled', 'error');
+        return;
+      }
+
+      log('Sending OTP to: ' + testEmail, 'info');
+      log('This may take 10-30 seconds...', 'warning');
+      log('', 'info');
+
+      try {
+        const { data, error } = await Promise.race([
+          window.testSupabase.auth.signInWithOtp({
+            email: testEmail,
+            options: {
+              emailRedirectTo: window.location.origin
+            }
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout after 30 seconds')), 30000)
+          )
+        ]);
+
+        if (error) {
+          log('✗ Auth error: ' + error.message, 'error');
+          log('Error details: ' + JSON.stringify(error, null, 2), 'error');
+        } else {
+          log('✓ SUCCESS! OTP email sent', 'success');
+          log('Check your email inbox for the login link', 'success');
+        }
+      } catch (error) {
+        log('✗ Exception: ' + error.message, 'error');
+        log('', 'info');
+        log('This usually means:', 'warning');
+        log('  1. Email auth is disabled in Supabase dashboard', 'warning');
+        log('  2. Network/firewall blocking the request', 'warning');
+        log('  3. Supabase project is paused/inactive', 'warning');
+      }
+    }
+    window.testAuth = testAuth;
+  </script>
+</body>
+</html>
