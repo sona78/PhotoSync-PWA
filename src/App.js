@@ -22,12 +22,18 @@ function App() {
   const {
     connectionState,
     photos,
+    photoData,
     connect,
     disconnect,
     requestManifest,
+    requestPhoto,
     error: syncError,
     syncProgress,
     debugLogs,
+    folders,
+    currentFolderId,
+    requestFolders,
+    requestFolderPhotos,
   } = activeSync;
 
   // Update photo count when photos change
@@ -150,6 +156,13 @@ function App() {
             error={syncError}
             syncProgress={syncProgress}
             requestManifest={requestManifest}
+            photoData={photoData}
+            requestPhoto={requestPhoto}
+            connectionMode="webrtc"
+            folders={folders}
+            currentFolderId={currentFolderId}
+            requestFolders={requestFolders}
+            requestFolderPhotos={requestFolderPhotos}
           />
         </div>
 

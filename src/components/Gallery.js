@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import './Gallery.css';
 
-const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest, photoData, requestPhoto, connectionMode }) => {
+const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest, photoData, requestPhoto, connectionMode, folders, currentFolderId, requestFolders, requestFolderPhotos }) => {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [loadedThumbnails, setLoadedThumbnails] = useState(new Set());
   const [requestedFullSize, setRequestedFullSize] = useState(new Set()); // Track which photos we've requested at full-size
   const [currentBatch, setCurrentBatch] = useState(0);
+  const [breadcrumbs, setBreadcrumbs] = useState([]);
   const BATCH_SIZE = 20;
   const BATCH_DELAY = 500; // ms between batches
 
@@ -16,8 +17,77 @@ const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest
     connectionMode,
     hasPhotoData: !!photoData,
     hasRequestPhoto: !!requestPhoto,
-    requestPhotoType: typeof requestPhoto
+    requestPhotoType: typeof requestPhoto,
+    foldersCount: folders?.length,
+    currentFolderId
   });
+
+  // Helper: Find folder by ID
+  const findFolderById = (folderId, folderList = folders) => {
+    if (!folderList) return null;
+    for (const folder of folderList) {
+      if (folder.id === folderId) {
+        return folder;
+      }
+      if (folder.subfolders && folder.subfolders.length > 0) {
+        const found = findFolderById(folderId, folder.subfolders);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Helper: Build breadcrumb for current folder
+  const buildBreadcrumb = (folderId) => {
+    if (folderId === 'all' || !folderId) {
+      return [];
+    }
+
+    const crumbs = [];
+    let currentFolder = findFolderById(folderId);
+
+    while (currentFolder) {
+      crumbs.unshift({
+        id: currentFolder.id,
+        name: currentFolder.displayName
+      });
+
+      // Find parent folder
+      if (currentFolder.folderPath === '') {
+        break; // This is a root folder
+      }
+
+      // For simplicity, break for now (parent lookup is complex)
+      break;
+    }
+
+    return crumbs;
+  };
+
+  // Helper: Navigate to folder
+  const navigateToFolder = (folderId) => {
+    if (folderId === 'all') {
+      // When viewing "all", request manifest but we won't show photos, just folders
+      if (requestManifest) {
+        requestManifest();
+      }
+      setBreadcrumbs([]);
+    } else if (requestFolderPhotos) {
+      requestFolderPhotos(folderId, false);
+      setBreadcrumbs(buildBreadcrumb(folderId));
+    }
+  };
+
+  // Helper: Get subfolders for current folder
+  const getCurrentSubfolders = () => {
+    if (!folders) return [];
+    if (currentFolderId === 'all' || !currentFolderId) {
+      return folders;
+    }
+
+    const currentFolder = findFolderById(currentFolderId);
+    return currentFolder ? currentFolder.subfolders : [];
+  };
 
   const handlePhotoClick = (photo) => {
     console.log('[Gallery] Photo clicked:', {
@@ -71,12 +141,13 @@ const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest
 
   // Auto-load thumbnails in batches
   useEffect(() => {
-    if (!requestPhoto || !photos || photos.length === 0 || connectionMode !== 'webrtc') {
+    if (!requestPhoto || !photos || photos.length === 0 || connectionMode !== 'webrtc' || currentFolderId === 'all') {
       console.log('[Gallery] Auto-load skipped:', {
         reason: !requestPhoto ? 'No requestPhoto function' :
                 !photos ? 'No photos array' :
                 photos.length === 0 ? 'Photos array empty' :
                 connectionMode !== 'webrtc' ? 'Not in WebRTC mode' :
+                currentFolderId === 'all' ? 'Viewing all folders' :
                 'Unknown'
       });
       return;
@@ -126,7 +197,7 @@ const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest
       setCurrentBatch(prev => prev + 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBatch, photos, requestPhoto, connectionMode]);
+  }, [currentBatch, photos, requestPhoto, connectionMode, currentFolderId]);
 
   // Show connection/error states
   if (connectionState === 'disconnected' && photos.length === 0) {
@@ -183,45 +254,131 @@ const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest
   return (
     <>
       {connectionState === 'connected' && (
-        <div style={{ marginBottom: '15px', textAlign: 'center' }}>
-          <button
-            onClick={requestManifest}
-            style={{
-              fontFamily: "'VT323', monospace",
-              fontSize: '18px',
-              padding: '10px 20px',
-              background: '#fff',
-              color: '#000',
-              border: '3px solid #000',
-              cursor: 'pointer',
-              textTransform: 'uppercase',
-            }}
-            onMouseOver={(e) => {
-              e.target.style.background = '#000';
-              e.target.style.color = '#fff';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.background = '#fff';
-              e.target.style.color = '#000';
-            }}
-          >
-            REFRESH PHOTOS
-          </button>
-          {isLoading && (
+        <>
+          {/* Navigation Bar */}
+          <div style={{
+            marginBottom: '20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            {/* Breadcrumb navigation */}
             <div style={{
-              marginTop: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
               fontFamily: "'VT323', monospace",
-              fontSize: '16px',
-              color: '#666'
+              fontSize: '18px'
             }}>
-              LOADING THUMBNAILS: {loadedCount}/{totalCount}
+              {currentFolderId === 'all' || !currentFolderId ? (
+                <span style={{ fontWeight: 'bold' }}>ALL PHOTOS</span>
+              ) : (
+                <>
+                  <span
+                    onClick={() => navigateToFolder('all')}
+                    style={{
+                      cursor: 'pointer',
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    HOME
+                  </span>
+                  {breadcrumbs.map(crumb => (
+                    <React.Fragment key={crumb.id}>
+                      <span> / </span>
+                      <span
+                        onClick={() => navigateToFolder(crumb.id)}
+                        style={{
+                          cursor: 'pointer',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        {crumb.name}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </>
+              )}
             </div>
-          )}
-        </div>
+
+            {/* All Photos button */}
+            <button
+              onClick={() => navigateToFolder('all')}
+              disabled={currentFolderId === 'all' || !currentFolderId}
+              style={{
+                fontFamily: "'VT323', monospace",
+                fontSize: '16px',
+                padding: '8px 16px',
+                background: (currentFolderId === 'all' || !currentFolderId) ? '#666' : '#000',
+                color: '#fff',
+                border: '3px solid ' + ((currentFolderId === 'all' || !currentFolderId) ? '#666' : '#000'),
+                cursor: (currentFolderId === 'all' || !currentFolderId) ? 'not-allowed' : 'pointer',
+                textTransform: 'uppercase'
+              }}
+            >
+              ALL PHOTOS
+            </button>
+          </div>
+
+          {/* Refresh button and loading indicator */}
+          <div style={{ marginBottom: '15px', textAlign: 'center' }}>
+            <button
+              onClick={requestManifest}
+              style={{
+                fontFamily: "'VT323', monospace",
+                fontSize: '18px',
+                padding: '10px 20px',
+                background: '#fff',
+                color: '#000',
+                border: '3px solid #000',
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+              }}
+              onMouseOver={(e) => {
+                e.target.style.background = '#000';
+                e.target.style.color = '#fff';
+              }}
+              onMouseOut={(e) => {
+                e.target.style.background = '#fff';
+                e.target.style.color = '#000';
+              }}
+            >
+              REFRESH PHOTOS
+            </button>
+            {isLoading && (
+              <div style={{
+                marginTop: '10px',
+                fontFamily: "'VT323', monospace",
+                fontSize: '16px',
+                color: '#666'
+              }}>
+                LOADING THUMBNAILS: {loadedCount}/{totalCount}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       <div className="gallery">
-        {photos.map((photo) => {
+        {/* Render folders first */}
+        {getCurrentSubfolders().map((folder) => (
+          <div
+            key={folder.id}
+            className="folder-item"
+            onClick={() => navigateToFolder(folder.id)}
+          >
+            <div style={{ fontSize: '48px', marginBottom: '10px' }}>📁</div>
+            <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>{folder.displayName}</div>
+            <div style={{ fontSize: '14px', opacity: 0.7 }}>
+              {folder.totalPhotoCount !== undefined ? folder.totalPhotoCount : folder.photoCount} PHOTOS
+            </div>
+          </div>
+        ))}
+
+        {/* Render photos ONLY when not viewing "all" */}
+        {currentFolderId !== 'all' && photos.map((photo) => {
           // Use photoData if available (WebRTC), otherwise use photo.thumbnail (legacy)
           const photoUrl = photoData && photoData[photo.id] ? photoData[photo.id] : photo.thumbnail;
 

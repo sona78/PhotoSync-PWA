@@ -21,6 +21,8 @@ export const usePhotoSyncWebRTC = () => {
   // Photo data
   const [photos, setPhotos] = useState([]);
   const [photoData, setPhotoData] = useState({}); // photoId -> blob URL
+  const [folders, setFolders] = useState([]);
+  const [currentFolderId, setCurrentFolderId] = useState('all');
 
   // Progress tracking
   const [syncProgress, ] = useState({ current: 0, total: 0 });
@@ -188,8 +190,11 @@ export const usePhotoSyncWebRTC = () => {
           // Start P2P heartbeat to keep data channel alive
           startPeerHeartbeat();
 
-          // Request manifest
-          requestManifest();
+          // Request folder structure first
+          requestFolders();
+
+          // Don't request manifest automatically - let user navigate folders
+          // requestManifest();
         });
 
         peer.on('data', (data) => {
@@ -260,16 +265,40 @@ export const usePhotoSyncWebRTC = () => {
           // Transform photos to match Gallery component expectations
           const transformedPhotos = message.photos.map(photo => ({
             id: photo.id,
-            filename: photo.name,
+            filename: photo.filename || photo.name,
             thumbnail: null, // Will be loaded on demand
             url: null, // Will be loaded on demand
             size: photo.size,
             width: photo.width,
             height: photo.height,
             modified: photo.modified,
-            created: photo.created
+            created: photo.created,
+            rootPath: photo.rootPath,
+            folderPath: photo.folderPath
           }));
           setPhotos(transformedPhotos);
+          break;
+
+        case 'folder-structure':
+          addLog(`Received folder structure: ${message.folders.length} root folders`);
+          setFolders(message.folders);
+          break;
+
+        case 'folder-photos':
+          addLog(`Received folder photos: ${message.photos.length} photos in folder ${message.folderId}`);
+          const transformedFolderPhotos = message.photos.map(photo => ({
+            id: photo.id,
+            filename: photo.filename,
+            thumbnail: null,
+            url: null,
+            size: photo.size,
+            width: photo.width,
+            height: photo.height,
+            modified: photo.modified,
+            rootPath: photo.rootPath,
+            folderPath: photo.folderPath
+          }));
+          setPhotos(transformedFolderPhotos);
           break;
 
         case 'photo-start':
@@ -352,6 +381,35 @@ export const usePhotoSyncWebRTC = () => {
   const requestManifest = useCallback(() => {
     addLog('Requesting photo manifest');
     sendToPeer({ type: 'request-manifest' });
+  }, [sendToPeer, addLog]);
+
+  /**
+   * Request folder structure
+   */
+  const requestFolders = useCallback(() => {
+    addLog('Requesting folder structure');
+    sendToPeer({ type: 'request-folders' });
+  }, [sendToPeer, addLog]);
+
+  /**
+   * Request photos in a specific folder
+   */
+  const requestFolderPhotos = useCallback((folderId, recursive = false) => {
+    if (folderId === 'all') {
+      // When viewing "all", clear photos and just show folders
+      addLog('Navigating to all folders view');
+      setCurrentFolderId('all');
+      setPhotos([]);
+      return;
+    }
+
+    addLog(`Requesting photos for folder: ${folderId}`);
+    sendToPeer({
+      type: 'request-folder-photos',
+      folderId,
+      recursive
+    });
+    setCurrentFolderId(folderId);
   }, [sendToPeer, addLog]);
 
   /**
@@ -522,6 +580,12 @@ export const usePhotoSyncWebRTC = () => {
     requestManifest,
     requestPhoto,
     requestPhotos,
+
+    // Folders
+    folders,
+    currentFolderId,
+    requestFolders,
+    requestFolderPhotos,
 
     // Progress
     syncProgress,

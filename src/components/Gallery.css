@@ -5,6 +5,28 @@
   gap: 15px;
 }
 
+.folder-item {
+  background: #f0f0f0;
+  border: 3px solid #000;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  aspect-ratio: 1;
+  transition: background 0.2s, color 0.2s;
+}
+
+.folder-item:hover {
+  background: #000;
+  color: #fff;
+}
+
 .photo-item {
   border: 2px solid #000;
   background: #fff;
