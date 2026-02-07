@@ -23,6 +23,8 @@ export const usePhotoSyncWebRTC = () => {
   const [photoData, setPhotoData] = useState({}); // photoId -> blob URL
   const [folders, setFolders] = useState([]);
   const [currentFolderId, setCurrentFolderId] = useState('all');
+  const [totalPhotoCount, setTotalPhotoCount] = useState(0);
+  const [hasMorePhotos, setHasMorePhotos] = useState(false);
 
   // Progress tracking
   const [syncProgress, ] = useState({ current: 0, total: 0 });
@@ -285,7 +287,7 @@ export const usePhotoSyncWebRTC = () => {
           break;
 
         case 'folder-photos':
-          addLog(`Received folder photos: ${message.photos.length} photos in folder ${message.folderId}`);
+          addLog(`Received folder photos: ${message.photos.length}/${message.totalCount} photos in folder ${message.folderId} (offset: ${message.offset})`);
           const transformedFolderPhotos = message.photos.map(photo => ({
             id: photo.id,
             filename: photo.filename,
@@ -298,7 +300,16 @@ export const usePhotoSyncWebRTC = () => {
             rootPath: photo.rootPath,
             folderPath: photo.folderPath
           }));
-          setPhotos(transformedFolderPhotos);
+
+          // If offset is 0, replace photos; otherwise append
+          if (message.offset === 0) {
+            setPhotos(transformedFolderPhotos);
+          } else {
+            setPhotos(prev => [...prev, ...transformedFolderPhotos]);
+          }
+
+          setTotalPhotoCount(message.totalCount || message.photos.length);
+          setHasMorePhotos(message.hasMore || false);
           break;
 
         case 'photo-start':
@@ -394,23 +405,46 @@ export const usePhotoSyncWebRTC = () => {
   /**
    * Request photos in a specific folder
    */
-  const requestFolderPhotos = useCallback((folderId, recursive = false) => {
+  const requestFolderPhotos = useCallback((folderId, recursive = false, offset = 0, limit = 200) => {
     if (folderId === 'all') {
       // When viewing "all", clear photos and just show folders
       addLog('Navigating to all folders view');
       setCurrentFolderId('all');
       setPhotos([]);
+      setTotalPhotoCount(0);
+      setHasMorePhotos(false);
       return;
     }
 
-    addLog(`Requesting photos for folder: ${folderId}`);
+    addLog(`Requesting photos for folder: ${folderId} (offset: ${offset}, limit: ${limit})`);
     sendToPeer({
       type: 'request-folder-photos',
       folderId,
-      recursive
+      recursive,
+      offset,
+      limit
     });
     setCurrentFolderId(folderId);
   }, [sendToPeer, addLog]);
+
+  /**
+   * Load more photos for the current folder
+   */
+  const loadMorePhotos = useCallback((limit = 200) => {
+    if (!hasMorePhotos || currentFolderId === 'all') {
+      return;
+    }
+
+    const currentOffset = photos.length;
+    addLog(`Loading more photos for folder: ${currentFolderId} (offset: ${currentOffset})`);
+    sendToPeer({
+      type: 'request-folder-photos',
+      folderId: currentFolderId,
+      recursive: false,
+      offset: currentOffset,
+      limit
+    });
+  }, [sendToPeer, addLog, hasMorePhotos, currentFolderId, photos.length]);
 
   /**
    * Request specific photo
@@ -586,6 +620,9 @@ export const usePhotoSyncWebRTC = () => {
     currentFolderId,
     requestFolders,
     requestFolderPhotos,
+    loadMorePhotos,
+    totalPhotoCount,
+    hasMorePhotos,
 
     // Progress
     syncProgress,

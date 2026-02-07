@@ -34,6 +34,9 @@ function App() {
     currentFolderId,
     requestFolders,
     requestFolderPhotos,
+    loadMorePhotos,
+    totalPhotoCount,
+    hasMorePhotos,
   } = activeSync;
 
   // Update photo count when photos change
@@ -163,6 +166,9 @@ function App() {
             currentFolderId={currentFolderId}
             requestFolders={requestFolders}
             requestFolderPhotos={requestFolderPhotos}
+            loadMorePhotos={loadMorePhotos}
+            totalPhotoCount={totalPhotoCount}
+            hasMorePhotos={hasMorePhotos}
           />
         </div>
 

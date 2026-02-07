@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './Gallery.css';
 
-const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest, photoData, requestPhoto, connectionMode, folders, currentFolderId, requestFolders, requestFolderPhotos }) => {
+const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest, photoData, requestPhoto, connectionMode, folders, currentFolderId, requestFolders, requestFolderPhotos, loadMorePhotos, totalPhotoCount, hasMorePhotos }) => {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [loadedThumbnails, setLoadedThumbnails] = useState(new Set());
   const [requestedFullSize, setRequestedFullSize] = useState(new Set()); // Track which photos we've requested at full-size
@@ -37,31 +37,37 @@ const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest
     return null;
   };
 
+  // Helper: Build full path to folder (returns array of folder IDs from root to target)
+  const buildFolderPath = (folderId, folderList = folders, path = []) => {
+    if (!folderList) return null;
+
+    for (const folder of folderList) {
+      if (folder.id === folderId) {
+        return [...path, folder];
+      }
+      if (folder.subfolders && folder.subfolders.length > 0) {
+        const found = buildFolderPath(folderId, folder.subfolders, [...path, folder]);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
   // Helper: Build breadcrumb for current folder
   const buildBreadcrumb = (folderId) => {
     if (folderId === 'all' || !folderId) {
       return [];
     }
 
-    const crumbs = [];
-    let currentFolder = findFolderById(folderId);
-
-    while (currentFolder) {
-      crumbs.unshift({
-        id: currentFolder.id,
-        name: currentFolder.displayName
-      });
-
-      // Find parent folder
-      if (currentFolder.folderPath === '') {
-        break; // This is a root folder
-      }
-
-      // For simplicity, break for now (parent lookup is complex)
-      break;
+    const folderPath = buildFolderPath(folderId);
+    if (!folderPath) {
+      return [];
     }
 
-    return crumbs;
+    return folderPath.map(folder => ({
+      id: folder.id,
+      name: folder.displayName
+    }));
   };
 
   // Helper: Navigate to folder
@@ -403,6 +409,46 @@ const Gallery = ({ photos, connectionState, error, syncProgress, requestManifest
           );
         })}
       </div>
+
+      {/* Load More Button */}
+      {currentFolderId !== 'all' && hasMorePhotos && (
+        <div style={{
+          marginTop: '20px',
+          textAlign: 'center'
+        }}>
+          <div style={{
+            fontFamily: "'VT323', monospace",
+            fontSize: '16px',
+            marginBottom: '10px',
+            color: '#666'
+          }}>
+            SHOWING {photos.length} OF {totalPhotoCount} PHOTOS
+          </div>
+          <button
+            onClick={loadMorePhotos}
+            style={{
+              fontFamily: "'VT323', monospace",
+              fontSize: '18px',
+              padding: '12px 24px',
+              background: '#fff',
+              color: '#000',
+              border: '3px solid #000',
+              cursor: 'pointer',
+              textTransform: 'uppercase',
+            }}
+            onMouseOver={(e) => {
+              e.target.style.background = '#000';
+              e.target.style.color = '#fff';
+            }}
+            onMouseOut={(e) => {
+              e.target.style.background = '#fff';
+              e.target.style.color = '#000';
+            }}
+          >
+            LOAD MORE PHOTOS
+          </button>
+        </div>
+      )}
 
       {/* Photo Viewer Modal */}
       {selectedPhoto && (
